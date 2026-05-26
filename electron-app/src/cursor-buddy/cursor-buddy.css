@@ -57,6 +57,11 @@ body {
   border-top-color: #d94841;
 }
 
+.cursor[data-mood="pointing"] .tip {
+  border-top-color: #2f7df6;
+  animation: pointTap 620ms ease-in-out infinite;
+}
+
 .cursor[data-mood="speaking"] .face {
   animation: pulse 900ms ease-in-out infinite;
 }
@@ -85,5 +90,15 @@ body {
   }
   50% {
     transform: translateY(-3px);
+  }
+}
+
+@keyframes pointTap {
+  0%,
+  100% {
+    transform: rotate(-18deg) translate(0, 0);
+  }
+  50% {
+    transform: rotate(-18deg) translate(4px, 4px);
   }
 }

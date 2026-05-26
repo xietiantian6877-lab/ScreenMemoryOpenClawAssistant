@@ -25,15 +25,13 @@ async function setCollapsed(collapsed) {
   await window.screenMemory.toggleCollapse(collapsed);
 }
 
-petFace.addEventListener("click", () => setCollapsed(!isCollapsed));
-petCard.addEventListener("click", (event) => {
-  if (event.target === petFace || event.target === petCard) setCollapsed(!isCollapsed);
-});
+petCard.addEventListener("click", () => setCollapsed(!isCollapsed));
 
 document.getElementById("openMemoryBtn").addEventListener("click", () => window.screenMemory.openMemoryFolder());
 document.getElementById("openMemoryBtnSettings").addEventListener("click", () => window.screenMemory.openMemoryFolder());
 document.getElementById("openPackagesBtn").addEventListener("click", () => window.screenMemory.openPackagesFolder());
 document.getElementById("testPopupBtn").addEventListener("click", () => window.screenMemory.testBlockedPopup());
+document.getElementById("summonBtn").addEventListener("click", () => window.screenMemory.summonMenu());
 document.getElementById("settingsBtn").addEventListener("click", () => setSettingsOpen(true));
 document.getElementById("settingsBackBtn").addEventListener("click", () => setSettingsOpen(false));
 document.getElementById("packageTodayBtn").addEventListener("click", () => packageMemory("today"));

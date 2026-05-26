@@ -33,7 +33,7 @@ const DEFAULT_CONFIG = {
   directTimeoutMs: 60000,
   modelContextWindow: 1000000,
   modelAutoCompactTokenLimit: 900000,
-  sendScreenshotsToModel: false,
+  sendScreenshotsToModel: true,
   buddyDefaultMode: "cursor"
 };
 
@@ -46,6 +46,8 @@ let summonWindow = null;
 let cursorBuddyTimer = null;
 let typewriterFollowTimer = null;
 let cursorBuddyHideTimer = null;
+let cursorBuddyMode = "cursor";
+let cursorBuddyPoint = null;
 let tray = null;
 let observeTimer = null;
 let config = loadConfig();
@@ -275,6 +277,7 @@ async function observeWithDirectModel(payload) {
     "你是 Windows 上贴在鼠标旁边的 Clicky 风格工作学习伙伴。",
     "这里的“用户卡住”指用户不会操作、不知道下一步该点哪里或怎么继续，不只是程序报错。",
     "请根据当前活动窗口、进程、停留时间、可选截图和已有上下文，估算用户正在工作或学习什么以及下一步怎么操作。",
+    "不要编造键盘快捷键；除非截图或窗口文本里明确出现快捷键，否则优先描述按钮、菜单、输入框、文件名或可见文字。",
     "只返回 JSON，格式为 {\"summary\":\"...\",\"blocked\":false,\"message\":\"...\",\"confidence\":\"...\"}。",
     "summary 写一条简短中文记忆摘要；如果可能不会操作、停留太久、或适合主动指导，blocked 为 true，message 给一句像老师一样具体的下一步建议。",
     "message 要短、可执行，优先告诉用户该看哪里、点哪里、改哪里或如何拆解任务。"
@@ -283,6 +286,8 @@ async function observeWithDirectModel(payload) {
     `活动进程：${payload.active_process || "未知"}`,
     `窗口标题：${payload.active_window_title || "未知"}`,
     `同一上下文停留分钟：${payload.same_context_minutes || 0}`,
+    "",
+    getScreenGeometryText(),
     "",
     "今日近期记忆：",
     payload.recent_memory || "暂无",
@@ -555,10 +560,14 @@ async function chatWithDirectModel(text) {
     "你是一个能看懂 Windows 当前任务上下文的 Clicky 风格桌面伙伴。",
     "用户卡住通常是不会操作、不知道下一步，而不只是报错。",
     "请像工作学习教练一样，结合当前窗口和今日记忆，给出简短、具体、可执行的下一步建议。",
+    "不要编造键盘快捷键；除非当前观察或截图明确出现快捷键，否则优先给鼠标可操作路径。",
+    "如果能根据截图确定要指的位置，可以在回复末尾附加 [POINT:x,y:label:screen0]，x/y 必须使用真实 Windows 屏幕坐标，不是缩略图坐标。用户可见回复里不要解释这个标记。",
     "如果需要用户补充信息，只问一个问题。"
   ].join("\n");
   const userText = [
     `用户输入：${text}`,
+    "",
+    getScreenGeometryText(),
     "",
     "当前观察：",
     current,
@@ -568,7 +577,7 @@ async function chatWithDirectModel(text) {
   ].join("\n");
   const data = await callOpenAIResponses({
     model: config.directModel,
-    input: buildResponsesInput(system, userText)
+    input: buildResponsesInput(system, userText, config.sendScreenshotsToModel ? await capturePrimaryScreenDataUrl() : "")
   });
   return extractResponseText(data) || "我看到了。建议先确认当前窗口里的主要提示，再按目标继续下一步。";
 }
@@ -582,6 +591,19 @@ function buildResponsesInput(systemText, userText, screenshotDataUrl = "") {
     { role: "system", content: [{ type: "input_text", text: systemText }] },
     { role: "user", content }
   ];
+}
+
+function getScreenGeometryText() {
+  const displays = screen.getAllDisplays();
+  const lines = displays.map((display, index) => {
+    const width = display.size?.width || display.bounds.width;
+    const height = display.size?.height || display.bounds.height;
+    const scale = Math.min(1, 1600 / Math.max(width, 1));
+    const imageWidth = Math.max(1, Math.round(width * scale));
+    const imageHeight = Math.max(1, Math.round(height * scale));
+    return `screen${index}: bounds=(${display.bounds.x},${display.bounds.y},${display.bounds.width},${display.bounds.height}), image=${imageWidth}x${imageHeight}, point坐标请输出真实Windows屏幕坐标`;
+  });
+  return ["屏幕坐标信息：", ...lines].join("\n");
 }
 
 async function callOpenAIResponses(body) {
@@ -603,11 +625,11 @@ async function callOpenAIResponses(body) {
     timeoutMs: config.directTimeoutMs || 60000
   };
   try {
-    return await requestJson(url, requestOptions);
+    return await requestJsonWithRetry(url, requestOptions);
   } catch (error) {
     if (effort !== "xhigh") throw error;
     const fallbackPayload = { ...payload, reasoning: { effort: "high" } };
-    return requestJson(url, { ...requestOptions, body: JSON.stringify(fallbackPayload) });
+    return requestJsonWithRetry(url, { ...requestOptions, body: JSON.stringify(fallbackPayload) });
   }
 }
 
@@ -658,6 +680,29 @@ function formatDirectModelError(error) {
     return "接口路径或模型不可用，请检查 base_url、wire_api 和 model。";
   }
   return `错误：${message}`;
+}
+
+async function requestJsonWithRetry(url, options, retries = 1) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await requestJson(url, options);
+    } catch (error) {
+      lastError = error;
+      if (!isConnectionReset(error) || attempt >= retries) break;
+      await delay(450);
+    }
+  }
+  throw lastError;
+}
+
+function isConnectionReset(error) {
+  const message = String(error?.message || error || "");
+  return error?.code === "ECONNRESET" || message.includes("ECONNRESET");
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function requestJson(url, options) {
@@ -712,6 +757,20 @@ function buildRecentMemoryContext(maxLines = 80) {
     .join("\n");
 }
 
+function extractPointCommands(reply) {
+  const points = [];
+  const text = String(reply || "").replace(/\[POINT\s*:\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*:\s*([^:\]]{0,60})\s*:\s*screen(\d+)\s*\]/gi, (_match, x, y, label, screenIndex) => {
+    points.push({
+      x: Number(x),
+      y: Number(y),
+      label: String(label || "").trim(),
+      screenIndex: Number(screenIndex || 0)
+    });
+    return "";
+  });
+  return { text: text.replace(/\s{2,}/g, " ").trim(), points };
+}
+
 async function handleChat(text) {
   let reply = "我先把这条反馈写进今天的记忆里。接上 OpenClaw 或 OpenAI 直连后，这里会返回它的建议。";
   if (directModelEnabled()) {
@@ -736,11 +795,14 @@ async function handleChat(text) {
     updateTray();
     publishState({ syncMessage: message });
   });
-  showTypewriterNearCursor(reply, {
+  const guidance = extractPointCommands(reply);
+  if (guidance.points.length) pointCursorBuddy(guidance.points[0]);
+  showTypewriterNearCursor(guidance.text, {
     autoCloseMs: 18000,
     force: true,
     persist: false,
-    mode: "cursor"
+    mode: "cursor",
+    showBuddy: false
   });
   return reply;
 }
@@ -845,7 +907,7 @@ function showTypewriterNearCursor(message, options = {}) {
   if (mode === "off" && !options.force) return;
   const autoCloseMs = Math.max(2600, options.autoCloseMs || 14000);
   const persist = options.persist ?? (mode !== "off" && !options.force);
-  if (mode !== "off") {
+  if (mode !== "off" && options.showBuddy === true) {
     showCursorBuddy(options.mood || "speaking", persist ? 24 * 60 * 60 * 1000 : autoCloseMs, mode);
   }
   if (typewriterWindow && !typewriterWindow.isDestroyed()) {
@@ -1020,11 +1082,14 @@ function showMainWindow() {
 
 function registerShortcuts() {
   globalShortcut.unregisterAll();
-  const ok = globalShortcut.register("Alt+`", () => {
-    showSummonButtonsNearCursor();
-  });
-  if (!ok) {
-    console.warn("Alt+` shortcut registration failed.");
+  const shortcuts = ["Alt+`", "Alt+Space", "CommandOrControl+Shift+Space", "F8"];
+  for (const accelerator of shortcuts) {
+    const ok = globalShortcut.register(accelerator, () => {
+      showSummonButtonsNearCursor();
+    });
+    if (!ok) {
+      console.warn(`${accelerator} shortcut registration failed.`);
+    }
   }
 }
 
@@ -1032,7 +1097,6 @@ function showSummonButtonsNearCursor() {
   if (summonWindow && !summonWindow.isDestroyed()) {
     summonWindow.close();
   }
-  showCursorBuddy("ready", 10000);
   const bounds = getCursorBuddyBounds(216, 72);
   summonWindow = new BrowserWindow({
     ...bounds,
@@ -1073,14 +1137,13 @@ function closeSummonWindow() {
 
 function requestTypingNearCursor() {
   closeSummonWindow();
-  showCursorBuddy("speaking", 12000);
   createChatWindow("告诉我你现在想完成什么，我会按当前窗口给你下一步。");
 }
 
 function requestGuidanceNearCursor() {
   closeSummonWindow();
   const hint = buildImmediateGuidance();
-  showTypewriterNearCursor(hint, { autoCloseMs: 16000, mood: "speaking", force: true, persist: false });
+  showTypewriterNearCursor(hint, { autoCloseMs: 16000, force: true, persist: false, showBuddy: false });
 }
 
 function buildImmediateGuidance() {
@@ -1129,8 +1192,37 @@ function showCursorBuddy(mood = "ready", autoHideMs = 12000, mode = "cursor") {
   }
   const reveal = () => {
     if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) return;
+    cursorBuddyMode = mode;
+    if (mode !== "point") cursorBuddyPoint = null;
     moveCursorBuddy(mode);
     setCursorBuddyMood(mood);
+    try {
+      cursorBuddyWindow.showInactive();
+    } catch {
+      cursorBuddyWindow.show();
+    }
+    if (cursorBuddyHideTimer) clearTimeout(cursorBuddyHideTimer);
+    cursorBuddyHideTimer = setTimeout(hideCursorBuddy, autoHideMs);
+  };
+  if (cursorBuddyWindow?.webContents.isLoading()) {
+    cursorBuddyWindow.once("ready-to-show", reveal);
+  } else {
+    reveal();
+  }
+}
+
+function pointCursorBuddy(point, autoHideMs = 8000) {
+  const normalized = normalizePoint(point);
+  if (!normalized) return;
+  cursorBuddyMode = "point";
+  cursorBuddyPoint = normalized;
+  if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) {
+    createCursorBuddy();
+  }
+  const reveal = () => {
+    if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) return;
+    moveCursorBuddy("point");
+    setCursorBuddyMood("pointing");
     try {
       cursorBuddyWindow.showInactive();
     } catch {
@@ -1153,25 +1245,31 @@ function hideCursorBuddy() {
     cursorBuddyWindow.webContents.send("buddy:mood", "leaving");
     setTimeout(() => {
       if (cursorBuddyWindow && !cursorBuddyWindow.isDestroyed()) cursorBuddyWindow.hide();
+      cursorBuddyPoint = null;
+      cursorBuddyMode = "cursor";
     }, 180);
   }
 }
 
 function startCursorBuddy() {
   stopCursorBuddy();
-  cursorBuddyTimer = setInterval(() => moveCursorBuddy(config.buddyDefaultMode || "cursor"), 0);
+  cursorBuddyTimer = setInterval(() => moveCursorBuddy(cursorBuddyMode || config.buddyDefaultMode || "cursor"), 0);
 }
 
 function stopCursorBuddy() {
   if (cursorBuddyTimer) clearInterval(cursorBuddyTimer);
   cursorBuddyTimer = null;
-  stopTypewriterFollow();
   if (cursorBuddyHideTimer) clearTimeout(cursorBuddyHideTimer);
   cursorBuddyHideTimer = null;
 }
 
 function moveCursorBuddy(mode = "cursor") {
   if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) return;
+  if (mode === "point" && cursorBuddyPoint) {
+    const bounds = getPointBuddyBounds(cursorBuddyPoint, 52, 52);
+    cursorBuddyWindow.setBounds(bounds);
+    return;
+  }
   if (mode === "corner") {
     const bounds = getCornerBuddyBounds(52, 52);
     cursorBuddyWindow.setBounds({ x: bounds.x, y: bounds.y + 70, width: 52, height: 52 });
@@ -1196,6 +1294,30 @@ function moveCursorBuddy(mode = "cursor") {
 function setCursorBuddyMood(mood) {
   if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) return;
   cursorBuddyWindow.webContents.send("buddy:mood", mood);
+}
+
+function normalizePoint(point) {
+  if (!point) return null;
+  const x = Number(point.x);
+  const y = Number(point.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y, label: String(point.label || ""), screenIndex: Number(point.screenIndex || 0) };
+}
+
+function getPointBuddyBounds(point, width, height) {
+  const displays = screen.getAllDisplays();
+  const display = displays[point.screenIndex] || screen.getDisplayNearestPoint({ x: point.x, y: point.y });
+  const area = display.workArea;
+  let x = Math.round(point.x) - 10;
+  let y = Math.round(point.y) - 10;
+  if (x + width > area.x + area.width - 8) x = Math.round(point.x) - width + 10;
+  if (y + height > area.y + area.height - 8) y = Math.round(point.y) - height + 10;
+  return {
+    x: Math.max(area.x + 8, Math.min(x, area.x + area.width - width - 8)),
+    y: Math.max(area.y + 8, Math.min(y, area.y + area.height - height - 8)),
+    width,
+    height
+  };
 }
 
 function createTray() {
@@ -1427,13 +1549,19 @@ function localDay() {
 async function capturePrimaryScreenDataUrl() {
   try {
     const primary = screen.getPrimaryDisplay();
+    const maxWidth = 1600;
+    const scale = Math.min(1, maxWidth / Math.max(primary.size.width, 1));
+    const thumbnailSize = {
+      width: Math.max(1, Math.round(primary.size.width * scale)),
+      height: Math.max(1, Math.round(primary.size.height * scale))
+    };
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
-      thumbnailSize: primary.size
+      thumbnailSize
     });
     const source = sources.find((item) => String(item.display_id) === String(primary.id)) || sources[0];
     if (!source || source.thumbnail.isEmpty()) return "";
-    return source.thumbnail.resize({ width: Math.min(primary.size.width, 1600) }).toDataURL();
+    return source.thumbnail.toDataURL();
   } catch {
     return "";
   }
@@ -1466,6 +1594,8 @@ function readRootTomlConfig() {
   if (topLevel.model_auto_compact_token_limit) result.modelAutoCompactTokenLimit = Number(topLevel.model_auto_compact_token_limit);
   if (providerBlock.base_url) result.directBaseUrl = providerBlock.base_url;
   if (providerBlock.wire_api) result.directWireApi = providerBlock.wire_api;
+  const screenBlock = readTomlBlock(text, "screen");
+  if (screenBlock.enable_screenshot !== undefined) result.sendScreenshotsToModel = parseTomlBool(screenBlock.enable_screenshot);
   if (directApiKey) result.directApiKey = directApiKey;
   return result;
 }
@@ -1579,6 +1709,7 @@ ipcMain.handle("chat:close", () => {
   if (chatWindow && !chatWindow.isDestroyed()) chatWindow.close();
 });
 ipcMain.handle("buddy:typewriter", (_event, text) => showTypewriterNearCursor(String(text || ""), { autoCloseMs: 12000 }));
+ipcMain.handle("buddy:summonMenu", () => showSummonButtonsNearCursor());
 ipcMain.handle("buddy:summonType", () => requestTypingNearCursor());
 ipcMain.handle("buddy:summonGuide", () => requestGuidanceNearCursor());
 ipcMain.handle("window:minimize", () => mainWindow?.minimize());
