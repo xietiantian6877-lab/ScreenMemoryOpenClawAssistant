@@ -15,9 +15,14 @@ wire_api = "auto"
 requires_openai_auth = true
 
 [assistant]
-observe_interval_seconds = 20
-notify_interval_minutes = 15
+observe_interval_seconds = 60
+observe_interval_min_seconds = 10
+observe_interval_max_seconds = 60
+notify_interval_minutes = 60
 blocked_check_minutes = 6
+companion_mode = "watch"
+proactive_guidance = false
+casual_chat = true
 memory_dir = "data/memory"
 language = "zh-CN"
 

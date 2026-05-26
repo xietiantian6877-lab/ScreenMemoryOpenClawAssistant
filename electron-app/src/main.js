@@ -16,8 +16,10 @@ const ROOT_CONFIG_PATH = path.join(PROJECT_ROOT, "config.toml");
 const DEFAULT_CONFIG = {
   tunnelBaseUrl: "",
   apiKey: "",
-  observeIntervalSeconds: 20,
-  notifyIntervalMinutes: 15,
+  observeIntervalSeconds: 60,
+  observeIntervalMinSeconds: 10,
+  observeIntervalMaxSeconds: 60,
+  notifyIntervalMinutes: 60,
   blockedCheckMinutes: 6,
   memoryEndpoint: "/memory/sync",
   directModelProvider: "OpenAI",
@@ -33,8 +35,11 @@ const DEFAULT_CONFIG = {
   directTimeoutMs: 60000,
   modelContextWindow: 1000000,
   modelAutoCompactTokenLimit: 900000,
-  sendScreenshotsToModel: true,
-  buddyDefaultMode: "cursor"
+  sendScreenshotsToModel: false,
+  buddyDefaultMode: "cursor",
+  companionMode: "watch",
+  proactiveGuidance: false,
+  casualChat: true
 };
 
 const TYPEWRITER_WIDTH = 300;
@@ -61,6 +66,7 @@ let lastObservation = null;
 let lastContextKey = "";
 let contextStartedAt = Date.now();
 let lastNotifyAt = 0;
+let lastCasualChatAt = 0;
 let lastBlockPromptAt = 0;
 let lastSyncMessage = "";
 let lastPackageMessage = "";
@@ -125,19 +131,30 @@ function createMainWindow() {
 
 function startObserver() {
   stopObserver();
-  observeOnce();
-  observeTimer = setInterval(observeOnce, config.observeIntervalSeconds * 1000);
+  observeOnce({ light: true });
+  scheduleNextObserve();
 }
 
 function stopObserver() {
-  if (observeTimer) clearInterval(observeTimer);
+  if (observeTimer) clearTimeout(observeTimer);
   observeTimer = null;
 }
 
-async function observeOnce() {
+function scheduleNextObserve() {
+  const minSeconds = Math.max(5, Number(config.observeIntervalMinSeconds || 10));
+  const maxSeconds = Math.max(minSeconds, Number(config.observeIntervalMaxSeconds || config.observeIntervalSeconds || 60));
+  const nextSeconds = minSeconds + Math.random() * (maxSeconds - minSeconds);
+  observeTimer = setTimeout(async () => {
+    await observeOnce({ light: true });
+    scheduleNextObserve();
+  }, Math.round(nextSeconds * 1000));
+}
+
+async function observeOnce(options = {}) {
   try {
     const active = await getActiveWindowInfo();
-    const screenshot = config.sendScreenshotsToModel ? await capturePrimaryScreenDataUrl() : "";
+    const lightMode = options.light || config.companionMode === "watch";
+    const screenshot = !lightMode && config.sendScreenshotsToModel ? await capturePrimaryScreenDataUrl() : "";
     const contextKey = `${active.process}|${active.title}`;
     const now = Date.now();
     if (contextKey !== lastContextKey) {
@@ -156,7 +173,7 @@ async function observeOnce() {
       language: "zh-CN"
     };
 
-    const result = await observeWithOpenClaw(payload);
+    const result = lightMode ? localObserveReadable(payload) : await observeWithOpenClaw(payload);
     const observation = {
       timestamp: new Date().toISOString(),
       active_window_title: active.title,
@@ -182,6 +199,7 @@ async function observeOnce() {
     });
     maybeNotify(observation);
     maybeAskBlocked(observation);
+    maybeCasualChat(observation);
     updateTaskbarOverlay(observation);
     updateTray();
   } catch (error) {
@@ -999,6 +1017,7 @@ async function handleChat(text) {
 }
 
 function maybeNotify(observation) {
+  if (config.companionMode === "watch") return;
   const now = Date.now();
   if (now - lastNotifyAt < config.notifyIntervalMinutes * 60000) return;
   lastNotifyAt = now;
@@ -1006,12 +1025,50 @@ function maybeNotify(observation) {
 }
 
 function maybeAskBlocked(observation) {
+  if (!config.proactiveGuidance) return;
   const now = Date.now();
   if (!observation.blocked || now - lastBlockPromptAt < config.blockedCheckMinutes * 60000) return;
   lastBlockPromptAt = now;
   const prompt = observation.metadata.message || "我猜你可能不确定下一步怎么操作，要不要我根据当前窗口帮你拆一下？";
   showTypewriterNearCursor(prompt, { autoCloseMs: 12000 });
   createChatWindow(prompt);
+}
+
+function maybeCasualChat(observation) {
+  if (!config.casualChat) return;
+  const now = Date.now();
+  if (now - lastCasualChatAt < 3 * 60000) return;
+  if (Math.random() > 0.22) return;
+  lastCasualChatAt = now;
+  const message = casualCommentForObservation(observation);
+  if (message) {
+    showTypewriterNearCursor(message, {
+      autoCloseMs: 9000,
+      force: true,
+      persist: false,
+      mode: "cursor",
+      showBuddy: false
+    });
+  }
+}
+
+function casualCommentForObservation(observation) {
+  const title = String(observation?.active_window_title || "");
+  const processName = String(observation?.active_process || "").toLowerCase();
+  if (!title && !processName) return "";
+  if (processName.includes("code") || processName.includes("cursor") || title.toLowerCase().includes("visual studio")) {
+    return "我在旁边看着，你现在像是在改代码。慢慢来，别急着一次全解决。";
+  }
+  if (processName.includes("chrome") || processName.includes("edge") || processName.includes("browser")) {
+    return "我看到你在浏览页面。需要我插话时我会轻一点，不抢屏。";
+  }
+  if (processName.includes("powershell") || processName.includes("terminal") || processName.includes("cmd")) {
+    return "终端这边我也看着，输出有变化我会记下来。";
+  }
+  if (title.includes("设置") || title.toLowerCase().includes("settings")) {
+    return "你在设置里转悠，我先安静看着。";
+  }
+  return "我在看着你的屏幕，先不指导你，就陪你工作一会儿。";
 }
 
 function createChatWindow(prompt) {
@@ -1688,6 +1745,8 @@ function publicConfig() {
   return {
     tunnelBaseUrl: config.tunnelBaseUrl,
     observeIntervalSeconds: config.observeIntervalSeconds,
+    observeIntervalMinSeconds: config.observeIntervalMinSeconds,
+    observeIntervalMaxSeconds: config.observeIntervalMaxSeconds,
     memoryEndpoint: config.memoryEndpoint,
     directModelProvider: config.directModelProvider,
     directBaseUrl: config.directBaseUrl,
@@ -1702,7 +1761,10 @@ function publicConfig() {
     modelAutoCompactTokenLimit: config.modelAutoCompactTokenLimit,
     directEnabled: directModelEnabled(),
     sendScreenshotsToModel: config.sendScreenshotsToModel,
-    buddyDefaultMode: config.buddyDefaultMode
+    buddyDefaultMode: config.buddyDefaultMode,
+    companionMode: config.companionMode,
+    proactiveGuidance: config.proactiveGuidance,
+    casualChat: config.casualChat
   };
 }
 
@@ -1740,8 +1802,13 @@ function saveDirectModelToRootConfig(nextConfig) {
   const existing = readText(ROOT_CONFIG_PATH);
   const assistantBlock = getTomlSectionRaw(existing, "assistant") || `[assistant]
 observe_interval_seconds = ${config.observeIntervalSeconds}
+observe_interval_min_seconds = ${config.observeIntervalMinSeconds || 10}
+observe_interval_max_seconds = ${config.observeIntervalMaxSeconds || 60}
 notify_interval_minutes = ${config.notifyIntervalMinutes}
 blocked_check_minutes = ${config.blockedCheckMinutes}
+companion_mode = "${config.companionMode || "watch"}"
+proactive_guidance = ${config.proactiveGuidance ? "true" : "false"}
+casual_chat = ${config.casualChat === false ? "false" : "true"}
 memory_dir = "data/memory"
 language = "zh-CN"
 `;
@@ -1864,6 +1931,15 @@ function readRootTomlConfig() {
   if (topLevel.model_auto_compact_token_limit) result.modelAutoCompactTokenLimit = Number(topLevel.model_auto_compact_token_limit);
   if (providerBlock.base_url) result.directBaseUrl = providerBlock.base_url;
   if (providerBlock.wire_api) result.directWireApi = providerBlock.wire_api;
+  const assistantBlock = readTomlBlock(text, "assistant");
+  if (assistantBlock.observe_interval_seconds) result.observeIntervalSeconds = Number(assistantBlock.observe_interval_seconds);
+  if (assistantBlock.observe_interval_min_seconds) result.observeIntervalMinSeconds = Number(assistantBlock.observe_interval_min_seconds);
+  if (assistantBlock.observe_interval_max_seconds) result.observeIntervalMaxSeconds = Number(assistantBlock.observe_interval_max_seconds);
+  if (assistantBlock.notify_interval_minutes) result.notifyIntervalMinutes = Number(assistantBlock.notify_interval_minutes);
+  if (assistantBlock.blocked_check_minutes) result.blockedCheckMinutes = Number(assistantBlock.blocked_check_minutes);
+  if (assistantBlock.companion_mode) result.companionMode = String(assistantBlock.companion_mode);
+  if (assistantBlock.proactive_guidance !== undefined) result.proactiveGuidance = parseTomlBool(assistantBlock.proactive_guidance);
+  if (assistantBlock.casual_chat !== undefined) result.casualChat = parseTomlBool(assistantBlock.casual_chat);
   const screenBlock = readTomlBlock(text, "screen");
   if (screenBlock.enable_screenshot !== undefined) result.sendScreenshotsToModel = parseTomlBool(screenBlock.enable_screenshot);
   if (directApiKey) result.directApiKey = directApiKey;

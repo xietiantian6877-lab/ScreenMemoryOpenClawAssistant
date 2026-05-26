@@ -6,6 +6,7 @@ This is not a macOS Clicky port. It is an Electron Windows implementation that e
 
 ## Features
 
+- Watch mode by default: the assistant quietly watches the screen, writes memory, and occasionally chats like a live-stream companion instead of proactively coaching every action.
 - Cursor-side typewriter replies with a stable fixed width and adaptive height.
 - Reply bubble follows the mouse smoothly; when the cursor becomes an I-beam over a text field, it moves down to avoid IME/input suggestions.
 - Clicky-style virtual pointer appears only when the model returns a `[POINT:x,y:label:screen0]` marker.
@@ -80,13 +81,26 @@ If a relay documents WebSocket-only Codex CLI support, this Electron app still n
 
 ## Using The Assistant
 
-- Type in the main bar and press send to ask for guidance.
+- Type in the bottom-right main bar and press send to actively reply to her or ask a question.
 - Press `F8` or click `?` to show summon buttons near the mouse.
 - Use `打字` to tell her your current goal.
 - Use `指引` to get an immediate next-step hint from the current window and memory.
 - Click the right-side pet to collapse/expand the bar. If collapsed from Settings, it reopens to the main composer.
 
 The right-side pet is the dock control. The small blue cursor is only a temporary pointer, not a permanent follower.
+
+Default companion mode:
+
+```toml
+[assistant]
+observe_interval_min_seconds = 10
+observe_interval_max_seconds = 60
+companion_mode = "watch"
+proactive_guidance = false
+casual_chat = true
+```
+
+In this mode, the assistant observes at a random interval between 10 and 60 seconds, avoids automatic guidance popups, and only occasionally comments. You can still actively talk to her through the bottom-right input.
 
 ## Memory
 
