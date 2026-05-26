@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("screenMemory", {
   minimize: () => ipcRenderer.invoke("window:minimize"),
   hide: () => ipcRenderer.invoke("window:hide"),
   close: () => ipcRenderer.invoke("window:close"),
+  toggleCollapse: (collapsed) => ipcRenderer.invoke("window:toggleCollapse", collapsed),
   setWindowMode: (mode) => ipcRenderer.invoke("window:setMode", mode),
   submitChat: (text) => ipcRenderer.invoke("chat:submit", text),
   closeChat: () => ipcRenderer.invoke("chat:close"),

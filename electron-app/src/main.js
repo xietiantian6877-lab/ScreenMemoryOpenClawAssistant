@@ -461,6 +461,28 @@ function setMainWindowMode(mode) {
   mainWindow.setBounds(bounds, true);
 }
 
+function toggleMainWindowCollapse(collapsed) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
+  
+  if (collapsed) {
+    // 收起到只显示宠物
+    const petSize = 92;
+    mainWindow.setMinimumSize(92, 92);
+    mainWindow.setMaximumSize(92, 92);
+    const x = area.x + area.width - petSize - 18;
+    const y = area.y + area.height - petSize - 18;
+    mainWindow.setBounds({ x, y, width: petSize, height: petSize }, true);
+  } else {
+    // 展开回原来大小
+    mainWindow.setMinimumSize(92, 92);
+    mainWindow.setMaximumSize(0, 0); // 移除最大限制
+    const bounds = getAnchoredBounds(760, 108, "bottom-right", 18);
+    mainWindow.setBounds(bounds, true);
+  }
+}
+
 function publishState(partial) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("state:update", getState(partial));
@@ -549,5 +571,6 @@ ipcMain.handle("window:minimize", () => mainWindow?.minimize());
 ipcMain.handle("window:hide", () => mainWindow?.hide());
 ipcMain.handle("window:close", () => app.quit());
 ipcMain.handle("window:setMode", (_event, mode) => setMainWindowMode(mode));
+ipcMain.handle("window:toggleCollapse", (_event, collapsed) => toggleMainWindowCollapse(collapsed));
 ipcMain.handle("memory:openFolder", () => shell.openPath(MEMORY_DIR));
 ipcMain.handle("debug:testBlockedPopup", () => createChatWindow("看起来你可能遇到了阻碍，要不要说说卡在哪里？"));

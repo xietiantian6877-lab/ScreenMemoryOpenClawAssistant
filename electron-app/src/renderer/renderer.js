@@ -14,12 +14,14 @@ const petCard = document.getElementById("petCard");
 const collapseBtn = document.getElementById("collapseBtn");
 const expandBtn = document.getElementById("expandBtn");
 
-collapseBtn.addEventListener("click", () => {
+collapseBtn.addEventListener("click", async () => {
   appShell.classList.add("collapsed");
+  await window.screenMemory.toggleCollapse(true);
 });
 
-expandBtn.addEventListener("click", () => {
+expandBtn.addEventListener("click", async () => {
   appShell.classList.remove("collapsed");
+  await window.screenMemory.toggleCollapse(false);
 });
 document.getElementById("openMemoryBtn").addEventListener("click", () => window.screenMemory.openMemoryFolder());
 document.getElementById("openMemoryBtnSettings").addEventListener("click", () => window.screenMemory.openMemoryFolder());
