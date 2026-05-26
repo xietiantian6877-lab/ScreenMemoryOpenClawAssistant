@@ -40,7 +40,7 @@ const DEFAULT_CONFIG = {
   companionMode: "watch",
   proactiveGuidance: false,
   casualChat: true,
-  casualChatFrequency: 35
+  casualChatFrequency: 70
 };
 
 const TYPEWRITER_WIDTH = 300;
@@ -68,6 +68,7 @@ let lastContextKey = "";
 let contextStartedAt = Date.now();
 let lastNotifyAt = 0;
 let lastCasualChatAt = 0;
+let lastCasualChatText = "";
 let lastBlockPromptAt = 0;
 let lastSyncMessage = "";
 let lastPackageMessage = "";
@@ -1039,13 +1040,15 @@ function maybeCasualChat(observation) {
   if (!config.casualChat) return;
   const now = Date.now();
   const frequency = normalizeFrequency(config.casualChatFrequency);
-  const minGapMs = (130 - frequency) * 1000;
-  const probability = Math.min(0.9, Math.max(0.05, frequency / 100));
+  if (frequency <= 0) return;
+  const minGapMs = Math.round((160 - frequency * 1.25) * 1000);
+  const probability = Math.min(0.95, Math.max(0.08, 0.12 + frequency / 105));
   if (now - lastCasualChatAt < minGapMs) return;
   if (Math.random() > probability) return;
-  lastCasualChatAt = now;
   const message = casualCommentForObservation(observation);
   if (message) {
+    lastCasualChatAt = now;
+    lastCasualChatText = message;
     showTypewriterNearCursor(message, {
       autoCloseMs: 9000,
       force: true,
@@ -1058,26 +1061,79 @@ function maybeCasualChat(observation) {
 
 function casualCommentForObservation(observation) {
   const title = String(observation?.active_window_title || "");
-  const processName = String(observation?.active_process || "").toLowerCase();
+  const processName = String(observation?.active_process || "");
+  const lowerTitle = title.toLowerCase();
+  const lowerProcess = processName.toLowerCase();
+  const summary = cleanObservationText(observation?.summary || "");
+  const minutes = Number(observation?.metadata?.same_context_minutes || 0);
+  const activity = describeActivityFromWindow(title, lowerProcess);
+  const detail = pickWindowDetail(title, summary);
+  const stayed = minutes >= 2 ? `这页你已经停了 ${Math.round(minutes)} 分钟，` : "";
+  const options = [];
+
   if (!title && !processName) return "";
-  if (processName.includes("code") || processName.includes("cursor") || title.toLowerCase().includes("visual studio")) {
-    return "我在旁边看着，你现在像是在改代码。慢慢来，别急着一次全解决。";
+  if (observation?.blocked && observation?.metadata?.message && config.proactiveGuidance) {
+    options.push(`我看到这里像是卡住了：${cleanObservationText(observation.metadata.message)}`);
   }
-  if (processName.includes("chrome") || processName.includes("edge") || processName.includes("browser")) {
-    return "我看到你在浏览页面。需要我插话时我会轻一点，不抢屏。";
+
+  if (lowerProcess.includes("code") || lowerProcess.includes("cursor") || lowerTitle.includes("visual studio")) {
+    options.push(`${stayed}你像是在改代码，焦点在「${detail}」。我先看你怎么推进，有异常信息我会记住。`);
+    options.push(`现在这段看起来和「${detail}」有关。你继续写，我会帮你把今天的修改脉络记下来。`);
+  } else if (lowerProcess.includes("chrome") || lowerProcess.includes("edge") || lowerProcess.includes("browser") || lowerProcess.includes("msedge")) {
+    options.push(`${stayed}你正在看「${detail}」。这页如果是在查资料，我会把关键上下文收进今天记忆。`);
+    options.push(`我看到你切到网页「${detail}」了。你先看内容，我会少打断但保持跟上。`);
+  } else if (lowerProcess.includes("powershell") || lowerProcess.includes("terminal") || lowerProcess.includes("cmd")) {
+    options.push(`${stayed}你在终端这边处理「${detail}」。如果输出里出现失败、连接、权限这些词，我会特别留意。`);
+    options.push(`终端现在是「${detail}」。我先陪你盯着结果，等你主动问我再拆命令。`);
+  } else if (lowerTitle.includes("设置") || lowerTitle.includes("settings")) {
+    options.push(`${stayed}你在设置页「${detail}」。我先不指导，等你打开操作指导再主动带步骤。`);
+  } else if (activity) {
+    options.push(`${stayed}我看到你在${activity}，当前窗口是「${detail}」。我会按这个上下文继续记。`);
   }
-  if (processName.includes("powershell") || processName.includes("terminal") || processName.includes("cmd")) {
-    return "终端这边我也看着，输出有变化我会记下来。";
+
+  if (summary && !summary.includes(detail)) {
+    options.push(`${stayed}${summary.slice(0, 72)}。我会把这个作为今天这段工作的线索。`);
   }
-  if (title.includes("设置") || title.toLowerCase().includes("settings")) {
-    return "你在设置里转悠，我先安静看着。";
+
+  options.push(`${stayed}我看到当前焦点是「${detail}」。我先陪看，不主动教操作。`);
+
+  const candidates = options
+    .map((text) => text.replace(/\s+/g, " ").trim())
+    .filter((text) => text && text !== lastCasualChatText);
+  return candidates[Math.floor(Math.random() * candidates.length)] || "";
+}
+
+function cleanObservationText(value) {
+  return String(value || "").replace(/\s+/g, " ").replace(/[。,.，；;]+$/g, "").trim();
+}
+
+function pickWindowDetail(title, summary) {
+  const normalizedTitle = cleanObservationText(title);
+  const normalizedSummary = cleanObservationText(summary);
+  const detail = normalizedTitle || normalizedSummary || "当前窗口";
+  return detail.length > 34 ? `${detail.slice(0, 34)}...` : detail;
+}
+
+function describeActivityFromWindow(title, lowerProcess) {
+  const lowerTitle = String(title || "").toLowerCase();
+  if (lowerProcess.includes("wps") || lowerProcess.includes("word") || lowerProcess.includes("excel") || lowerTitle.includes(".doc") || lowerTitle.includes(".xls")) {
+    return "整理文档";
   }
-  return "我在看着你的屏幕，先不指导你，就陪你工作一会儿。";
+  if (lowerProcess.includes("photoshop") || lowerProcess.includes("ps") || lowerTitle.includes(".psd")) {
+    return "处理设计文件";
+  }
+  if (lowerProcess.includes("explorer")) {
+    return "管理文件";
+  }
+  if (lowerTitle.includes("github")) {
+    return "处理 GitHub 页面";
+  }
+  return "";
 }
 
 function normalizeFrequency(value) {
   const number = Number(value);
-  if (!Number.isFinite(number)) return 35;
+  if (!Number.isFinite(number)) return 70;
   return Math.max(0, Math.min(100, number));
 }
 
@@ -1382,9 +1438,9 @@ function getAnchoredBounds(preferredWidth, preferredHeight, corner, margin = 18)
 
 function setMainWindowMode(mode) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const height = mode === "settings" ? 252 : 108;
+  const height = mode === "settings" ? 288 : 108;
   const bounds = getAnchoredBounds(760, height, "bottom-right", 18);
-  mainWindow.setMinimumSize(520, mode === "settings" ? 232 : 92);
+  mainWindow.setMinimumSize(520, mode === "settings" ? 268 : 92);
   mainWindow.setBounds(bounds, false);
 }
 
@@ -1812,19 +1868,7 @@ function saveConfig(nextConfig) {
 
 function saveDirectModelToRootConfig(nextConfig) {
   const existing = readText(ROOT_CONFIG_PATH);
-  const assistantBlock = getTomlSectionRaw(existing, "assistant") || `[assistant]
-observe_interval_seconds = ${config.observeIntervalSeconds}
-observe_interval_min_seconds = ${config.observeIntervalMinSeconds || 10}
-observe_interval_max_seconds = ${config.observeIntervalMaxSeconds || 60}
-notify_interval_minutes = ${config.notifyIntervalMinutes}
-blocked_check_minutes = ${config.blockedCheckMinutes}
-companion_mode = "${config.companionMode || "watch"}"
-proactive_guidance = ${config.proactiveGuidance ? "true" : "false"}
-casual_chat = ${config.casualChat === false ? "false" : "true"}
-casual_chat_frequency = ${normalizeFrequency(config.casualChatFrequency)}
-memory_dir = "data/memory"
-language = "zh-CN"
-`;
+  const assistantBlock = formatAssistantToml(config);
   const tunnelBlock = getTomlSectionRaw(existing, "tunnel") || `[tunnel]
 base_url = "${config.tunnelBaseUrl || ""}"
 api_key = ""
@@ -1864,6 +1908,64 @@ redact_window_titles = false
     .map((block) => block.trim())
     .join("\n\n") + "\n";
   fs.writeFileSync(ROOT_CONFIG_PATH, content, "utf8");
+}
+
+function saveAssistantConfigToRootConfig() {
+  const existing = readText(ROOT_CONFIG_PATH);
+  const directBlock = formatDirectToml({
+    modelProvider: config.directModelProvider || "OpenAI",
+    model: config.directModel || "gpt-5.5",
+    reviewModel: config.directReviewModel || "gpt-5.4",
+    reasoningEffort: config.directReasoningEffort || "xhigh",
+    disableResponseStorage: config.disableResponseStorage === undefined ? true : Boolean(config.disableResponseStorage),
+    networkAccess: config.networkAccess || "enabled",
+    windowsWslSetupAcknowledged:
+      config.windowsWslSetupAcknowledged === undefined ? true : Boolean(config.windowsWslSetupAcknowledged),
+    modelContextWindow: Number(config.modelContextWindow || 1000000),
+    modelAutoCompactTokenLimit: Number(config.modelAutoCompactTokenLimit || 900000),
+    baseUrl: config.directBaseUrl || "https://fast.allincoding.cc",
+    wireApi: config.directWireApi || "auto"
+  });
+  const assistantBlock = formatAssistantToml(config);
+  const tunnelBlock = getTomlSectionRaw(existing, "tunnel") || `[tunnel]
+base_url = "${config.tunnelBaseUrl || ""}"
+api_key = ""
+memory_endpoint = "${config.memoryEndpoint || "/memory/sync"}"
+timeout_seconds = 12
+`;
+  const screenBlock = getTomlSectionRaw(existing, "screen") || `[screen]
+enable_screenshot = true
+enable_ocr = false
+ocr_max_chars = 1200
+`;
+  const openclawBlock = getTomlSectionRaw(existing, "openclaw") || `[openclaw]
+base_url = "${config.tunnelBaseUrl || ""}"
+api_key = ""
+timeout_seconds = 12
+`;
+  const privacyBlock = getTomlSectionRaw(existing, "privacy") || `[privacy]
+store_screenshots = false
+redact_window_titles = false
+`;
+  const content = [directBlock, assistantBlock, tunnelBlock, screenBlock, openclawBlock, privacyBlock]
+    .map((block) => block.trim())
+    .join("\n\n") + "\n";
+  fs.writeFileSync(ROOT_CONFIG_PATH, content, "utf8");
+}
+
+function formatAssistantToml(values) {
+  return `[assistant]
+observe_interval_seconds = ${Number(values.observeIntervalSeconds || 60)}
+observe_interval_min_seconds = ${Number(values.observeIntervalMinSeconds || 10)}
+observe_interval_max_seconds = ${Number(values.observeIntervalMaxSeconds || 60)}
+notify_interval_minutes = ${Number(values.notifyIntervalMinutes || 60)}
+blocked_check_minutes = ${Number(values.blockedCheckMinutes || 6)}
+companion_mode = "${escapeTomlString(values.companionMode || "watch")}"
+proactive_guidance = ${values.proactiveGuidance ? "true" : "false"}
+casual_chat = ${values.casualChat === false ? "false" : "true"}
+casual_chat_frequency = ${normalizeFrequency(values.casualChatFrequency)}
+memory_dir = "data/memory"
+language = "zh-CN"`;
 }
 
 function formatDirectToml(values) {
@@ -2055,6 +2157,13 @@ ipcMain.handle("config:saveBuddyMode", (_event, mode) => {
 });
 ipcMain.handle("config:saveCasualChatFrequency", (_event, value) => {
   const next = saveConfig({ casualChatFrequency: normalizeFrequency(value), casualChat: Number(value) > 0 });
+  saveAssistantConfigToRootConfig();
+  publishState({ config: next });
+  return next;
+});
+ipcMain.handle("config:saveProactiveGuidance", (_event, enabled) => {
+  const next = saveConfig({ proactiveGuidance: Boolean(enabled) });
+  saveAssistantConfigToRootConfig();
   publishState({ config: next });
   return next;
 });

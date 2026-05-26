@@ -18,6 +18,7 @@ const petCard = document.getElementById("petCard");
 const buddyModeSelect = document.getElementById("buddyModeSelect");
 const chatFrequencyInput = document.getElementById("chatFrequencyInput");
 const chatFrequencyText = document.getElementById("chatFrequencyText");
+const guidanceToggle = document.getElementById("guidanceToggle");
 
 let isCollapsed = false;
 
@@ -47,10 +48,14 @@ buddyModeSelect.addEventListener("change", async () => {
   renderConfig(config);
 });
 chatFrequencyInput.addEventListener("input", () => {
-  chatFrequencyText.textContent = `${chatFrequencyInput.value}%`;
+  renderChatFrequencyText(Number(chatFrequencyInput.value));
 });
 chatFrequencyInput.addEventListener("change", async () => {
   const config = await window.screenMemory.saveCasualChatFrequency(Number(chatFrequencyInput.value));
+  renderConfig(config);
+});
+guidanceToggle.addEventListener("change", async () => {
+  const config = await window.screenMemory.saveProactiveGuidance(guidanceToggle.checked);
   renderConfig(config);
 });
 
@@ -162,9 +167,10 @@ function renderConfig(config) {
   if (document.activeElement !== directModelInput) directModelInput.value = config?.directModel || "gpt-5.5";
   if (document.activeElement !== directReviewModelInput) directReviewModelInput.value = config?.directReviewModel || "gpt-5.4";
   if (document.activeElement !== buddyModeSelect) buddyModeSelect.value = config?.buddyDefaultMode || "cursor";
-  const frequency = Number(config?.casualChatFrequency ?? 35);
+  const frequency = Number(config?.casualChatFrequency ?? 70);
   if (document.activeElement !== chatFrequencyInput) chatFrequencyInput.value = String(frequency);
-  chatFrequencyText.textContent = `${frequency}%`;
+  renderChatFrequencyText(frequency);
+  guidanceToggle.checked = Boolean(config?.proactiveGuidance);
 
   if (config?.directEnabled) {
     connectionText.textContent = "OpenAI 直连";
@@ -175,6 +181,19 @@ function renderConfig(config) {
   } else {
     connectionText.textContent = "本地判断";
     settingsStatus.textContent = "未配置直连/隧穿";
+  }
+}
+
+function renderChatFrequencyText(value) {
+  const frequency = Number.isFinite(Number(value)) ? Number(value) : 70;
+  if (frequency <= 0) {
+    chatFrequencyText.textContent = "关闭";
+  } else if (frequency < 35) {
+    chatFrequencyText.textContent = `低 ${frequency}%`;
+  } else if (frequency < 70) {
+    chatFrequencyText.textContent = `中 ${frequency}%`;
+  } else {
+    chatFrequencyText.textContent = `高 ${frequency}%`;
   }
 }
 

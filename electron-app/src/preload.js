@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("screenMemory", {
   saveDirectModel: (config) => ipcRenderer.invoke("config:saveDirectModel", config),
   saveBuddyMode: (mode) => ipcRenderer.invoke("config:saveBuddyMode", mode),
   saveCasualChatFrequency: (value) => ipcRenderer.invoke("config:saveCasualChatFrequency", value),
+  saveProactiveGuidance: (enabled) => ipcRenderer.invoke("config:saveProactiveGuidance", enabled),
   syncToday: () => ipcRenderer.invoke("memory:syncToday"),
   packageMemory: (scope) => ipcRenderer.invoke("memory:package", scope),
   importMemoryPackage: () => ipcRenderer.invoke("memory:importPackage"),

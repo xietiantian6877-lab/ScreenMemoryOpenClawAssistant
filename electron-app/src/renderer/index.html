@@ -48,7 +48,7 @@
           <button id="syncTodayBtn" class="secondary">同步</button>
           <button id="testPopupBtn" class="secondary">测试</button>
         </div>
-        <div class="settings-row secondary-row">
+        <div class="settings-row secondary-row controls-row">
           <label class="buddy-mode">
             <span>说话位置</span>
             <select id="buddyModeSelect">
@@ -60,8 +60,14 @@
           <label class="chat-frequency">
             <span>聊天频率</span>
             <input id="chatFrequencyInput" type="range" min="0" max="100" step="5" />
-            <output id="chatFrequencyText">35%</output>
+            <output id="chatFrequencyText">70%</output>
           </label>
+          <label class="guide-toggle">
+            <input id="guidanceToggle" type="checkbox" />
+            <span>操作指导</span>
+          </label>
+        </div>
+        <div class="settings-row secondary-row memory-row">
           <button id="openMemoryBtnSettings" class="secondary">打开记忆</button>
           <button id="openPackagesBtn" class="secondary">打开记忆包</button>
           <span id="settingsStatus">本地判断</span>

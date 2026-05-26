@@ -354,12 +354,42 @@ input::placeholder {
   font-size: 12px;
 }
 
-.buddy-mode {
+.controls-row,
+.memory-row {
+  flex-wrap: wrap;
+}
+
+.buddy-mode,
+.chat-frequency,
+.guide-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.chat-frequency input[type="range"] {
+  width: 118px;
+  height: 18px;
+  padding: 0;
+  accent-color: #2f7df6;
+}
+
+.chat-frequency output {
+  min-width: 48px;
+  color: #5d6470;
+}
+
+.guide-toggle input[type="checkbox"] {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  accent-color: #2f7df6;
+}
+
+.memory-row {
+  margin-top: 6px;
 }
 
 .window-actions {

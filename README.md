@@ -98,9 +98,10 @@ observe_interval_max_seconds = 60
 companion_mode = "watch"
 proactive_guidance = false
 casual_chat = true
+casual_chat_frequency = 70
 ```
 
-In this mode, the assistant observes at a random interval between 10 and 60 seconds, avoids automatic guidance popups, and only occasionally comments. You can still actively talk to her through the bottom-right input.
+In this mode, the assistant observes at a random interval between 10 and 60 seconds, avoids automatic guidance popups, and comments like she is watching your screen. Use the Settings slider to lower or raise `聊天频率`; set it to `0` to silence casual chat. Turn `操作指导` on only when you want her to proactively teach next steps. You can still actively talk to her through the bottom-right input.
 
 ## Memory
 
