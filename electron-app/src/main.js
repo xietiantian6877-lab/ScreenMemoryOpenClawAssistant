@@ -41,6 +41,8 @@ const DEFAULT_CONFIG = {
 const TYPEWRITER_WIDTH = 300;
 const TYPEWRITER_HEIGHT = 112;
 const TYPEWRITER_POINTER_PAD = 18;
+const TYPEWRITER_MAX_WIDTH = 540;
+const TYPEWRITER_MAX_HEIGHT_RATIO = 0.58;
 
 let mainWindow = null;
 let chatWindow = null;
@@ -1171,6 +1173,23 @@ function positionNearCursor(window, margin = 12, options = {}) {
   });
 }
 
+function resizeTypewriterWindow(bounds = {}) {
+  if (!typewriterWindow || typewriterWindow.isDestroyed()) return false;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const area = display.workArea;
+  const width = Math.max(
+    TYPEWRITER_WIDTH + TYPEWRITER_POINTER_PAD,
+    Math.min(Number(bounds.width || TYPEWRITER_WIDTH), Math.min(TYPEWRITER_MAX_WIDTH, area.width - 24))
+  );
+  const height = Math.max(
+    84,
+    Math.min(Number(bounds.height || TYPEWRITER_HEIGHT), Math.floor(area.height * TYPEWRITER_MAX_HEIGHT_RATIO))
+  );
+  typewriterWindow.setSize(Math.round(width), Math.round(height), false);
+  positionNearCursor(typewriterWindow, 12, { avoidIme: shouldAvoidIme(), pointerPad: TYPEWRITER_POINTER_PAD });
+  return true;
+}
+
 function startTypewriterFollow() {
   stopTypewriterFollow();
   const cursor = screen.getCursorScreenPoint();
@@ -1901,6 +1920,7 @@ ipcMain.handle("chat:close", () => {
   if (chatWindow && !chatWindow.isDestroyed()) chatWindow.close();
 });
 ipcMain.handle("buddy:typewriter", (_event, text) => showTypewriterNearCursor(String(text || ""), { autoCloseMs: 12000 }));
+ipcMain.handle("buddy:typewriterResize", (_event, bounds) => resizeTypewriterWindow(bounds));
 ipcMain.handle("buddy:summonMenu", () => showSummonButtonsNearCursor());
 ipcMain.handle("buddy:summonType", () => requestTypingNearCursor());
 ipcMain.handle("buddy:summonGuide", () => requestGuidanceNearCursor());
