@@ -18,7 +18,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -128,6 +129,17 @@ input {
   border: 0;
   outline: none;
   font-size: 14px;
+}
+
+select {
+  height: 32px;
+  padding: 0 8px;
+  color: #30343b;
+  background: #fff;
+  border: 1px solid #d9dce2;
+  border-radius: 10px;
+  outline: none;
+  -webkit-app-region: no-drag;
 }
 
 input::placeholder {
@@ -339,6 +351,14 @@ input::placeholder {
 .secondary-row {
   color: #8c929c;
   font-size: 12px;
+}
+
+.buddy-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .window-actions {

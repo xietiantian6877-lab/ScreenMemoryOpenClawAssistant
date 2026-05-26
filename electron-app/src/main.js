@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage, dialog, desktopCapturer } = require("electron");
+const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage, dialog, desktopCapturer, globalShortcut } = require("electron");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const http = require("http");
@@ -33,7 +33,8 @@ const DEFAULT_CONFIG = {
   directTimeoutMs: 60000,
   modelContextWindow: 1000000,
   modelAutoCompactTokenLimit: 900000,
-  sendScreenshotsToModel: false
+  sendScreenshotsToModel: false,
+  buddyDefaultMode: "cursor"
 };
 
 let mainWindow = null;
@@ -41,6 +42,7 @@ let chatWindow = null;
 let toastWindow = null;
 let typewriterWindow = null;
 let cursorBuddyWindow = null;
+let summonWindow = null;
 let cursorBuddyTimer = null;
 let cursorBuddyHideTimer = null;
 let tray = null;
@@ -60,12 +62,14 @@ app.whenReady().then(() => {
   fs.mkdirSync(PACKAGES_DIR, { recursive: true });
   createMainWindow();
   createTray();
+  registerShortcuts();
   startObserver();
 });
 
 app.on("window-all-closed", () => {
   stopObserver();
   stopCursorBuddy();
+  globalShortcut.unregisterAll();
   if (process.platform !== "darwin") app.quit();
 });
 
@@ -790,8 +794,8 @@ function showToast(title, message) {
     movable: false,
     backgroundColor: "#00000000",
     webPreferences: {
-      contextIsolation: false,
-      nodeIntegration: true
+      contextIsolation: true,
+      nodeIntegration: false
     }
   });
 
@@ -818,12 +822,16 @@ function showToast(title, message) {
 function showTypewriterNearCursor(message, options = {}) {
   const text = String(message || "").trim();
   if (!text) return;
-  showCursorBuddy(options.mood || "speaking", Math.max(2600, options.autoCloseMs || 14000));
+  const mode = options.mode || config.buddyDefaultMode || "cursor";
+  const autoCloseMs = Math.max(2600, options.autoCloseMs || 14000);
+  if (mode !== "off") {
+    showCursorBuddy(options.mood || "speaking", autoCloseMs, mode);
+  }
   if (typewriterWindow && !typewriterWindow.isDestroyed()) {
     typewriterWindow.close();
   }
 
-  const bounds = getCursorBuddyBounds(380, 156);
+  const bounds = mode === "corner" ? getCornerBuddyBounds(380, 156) : getCursorBuddyBounds(380, 156);
   typewriterWindow = new BrowserWindow({
     ...bounds,
     frame: false,
@@ -837,8 +845,8 @@ function showTypewriterNearCursor(message, options = {}) {
     hasShadow: false,
     backgroundColor: "#00000000",
     webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false
+      contextIsolation: false,
+      nodeIntegration: true
     }
   });
   typewriterWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -875,6 +883,18 @@ function getCursorBuddyBounds(preferredWidth, preferredHeight) {
   return {
     x: Math.max(area.x + 10, Math.min(x, area.x + area.width - width - 10)),
     y: Math.max(area.y + 10, Math.min(y, area.y + area.height - height - 10)),
+    width,
+    height
+  };
+}
+
+function getCornerBuddyBounds(preferredWidth, preferredHeight) {
+  const area = screen.getPrimaryDisplay().workArea;
+  const width = Math.min(preferredWidth, Math.max(280, area.width - 24));
+  const height = Math.min(preferredHeight, Math.max(120, area.height - 24));
+  return {
+    x: area.x + area.width - width - 18,
+    y: area.y + 18,
     width,
     height
   };
@@ -946,6 +966,77 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
+function registerShortcuts() {
+  globalShortcut.unregisterAll();
+  globalShortcut.register("Alt+`", () => {
+    showSummonButtonsNearCursor();
+  });
+}
+
+function showSummonButtonsNearCursor() {
+  if (summonWindow && !summonWindow.isDestroyed()) {
+    summonWindow.close();
+  }
+  showCursorBuddy("ready", 10000);
+  const bounds = getCursorBuddyBounds(216, 72);
+  summonWindow = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    show: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  summonWindow.loadFile(path.join(__dirname, "summon", "summon.html"));
+  summonWindow.once("ready-to-show", () => {
+    if (!summonWindow || summonWindow.isDestroyed()) return;
+    try {
+      summonWindow.showInactive();
+    } catch {
+      summonWindow.show();
+    }
+  });
+  summonWindow.on("blur", () => {
+    if (summonWindow && !summonWindow.isDestroyed()) summonWindow.close();
+  });
+  summonWindow.on("closed", () => {
+    summonWindow = null;
+  });
+}
+
+function closeSummonWindow() {
+  if (summonWindow && !summonWindow.isDestroyed()) summonWindow.close();
+}
+
+function requestTypingNearCursor() {
+  closeSummonWindow();
+  showCursorBuddy("speaking", 12000);
+  createChatWindow("告诉我你现在想完成什么，我会按当前窗口给你下一步。");
+}
+
+function requestGuidanceNearCursor() {
+  closeSummonWindow();
+  const hint = buildImmediateGuidance();
+  showTypewriterNearCursor(hint, { autoCloseMs: 16000, mood: "speaking" });
+}
+
+function buildImmediateGuidance() {
+  if (lastObservation?.metadata?.message) return lastObservation.metadata.message;
+  if (lastObservation?.summary) {
+    const title = lastObservation.active_window_title || "当前窗口";
+    return `我先按「${title}」来带你：看窗口里最明显的按钮、错误提示或输入框，先处理最靠近任务目标的那一项。你也可以按“打字”告诉我目标。`;
+  }
+  return "我还没识别到足够上下文。先把你要完成的目标打给我，我会一步一步带你操作。";
+}
+
 function createCursorBuddy() {
   if (cursorBuddyWindow && !cursorBuddyWindow.isDestroyed()) return;
   cursorBuddyWindow = new BrowserWindow({
@@ -962,8 +1053,8 @@ function createCursorBuddy() {
     hasShadow: false,
     backgroundColor: "#00000000",
     webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false
+      contextIsolation: false,
+      nodeIntegration: true
     }
   });
   cursorBuddyWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -978,13 +1069,13 @@ function createCursorBuddy() {
   });
 }
 
-function showCursorBuddy(mood = "ready", autoHideMs = 12000) {
+function showCursorBuddy(mood = "ready", autoHideMs = 12000, mode = "cursor") {
   if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) {
     createCursorBuddy();
   }
   const reveal = () => {
     if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) return;
-    moveCursorBuddy();
+    moveCursorBuddy(mode);
     setCursorBuddyMood(mood);
     try {
       cursorBuddyWindow.showInactive();
@@ -1014,7 +1105,7 @@ function hideCursorBuddy() {
 
 function startCursorBuddy() {
   stopCursorBuddy();
-  cursorBuddyTimer = setInterval(moveCursorBuddy, 120);
+  cursorBuddyTimer = setInterval(() => moveCursorBuddy(config.buddyDefaultMode || "cursor"), 120);
 }
 
 function stopCursorBuddy() {
@@ -1024,8 +1115,13 @@ function stopCursorBuddy() {
   cursorBuddyHideTimer = null;
 }
 
-function moveCursorBuddy() {
+function moveCursorBuddy(mode = "cursor") {
   if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) return;
+  if (mode === "corner") {
+    const bounds = getCornerBuddyBounds(70, 70);
+    cursorBuddyWindow.setBounds({ x: bounds.x, y: bounds.y + 82, width: 70, height: 70 });
+    return;
+  }
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
   const area = display.workArea;
@@ -1158,7 +1254,8 @@ function publicConfig() {
     modelContextWindow: config.modelContextWindow,
     modelAutoCompactTokenLimit: config.modelAutoCompactTokenLimit,
     directEnabled: directModelEnabled(),
-    sendScreenshotsToModel: config.sendScreenshotsToModel
+    sendScreenshotsToModel: config.sendScreenshotsToModel,
+    buddyDefaultMode: config.buddyDefaultMode
   };
 }
 
@@ -1180,9 +1277,10 @@ function saveConfig(nextConfig) {
   const merged = { ...config, ...nextConfig };
   config = {
     ...merged,
-    tunnelBaseUrl: String(merged.tunnelBaseUrl || "").trim().replace(/\/+$/, ""),
-    directBaseUrl: String(merged.directBaseUrl || "").trim().replace(/\/+$/, ""),
-    directApiKey: String(merged.directApiKey || "").trim()
+  tunnelBaseUrl: String(merged.tunnelBaseUrl || "").trim().replace(/\/+$/, ""),
+  directBaseUrl: String(merged.directBaseUrl || "").trim().replace(/\/+$/, ""),
+    directApiKey: String(merged.directApiKey || "").trim(),
+    buddyDefaultMode: normalizeBuddyMode(merged.buddyDefaultMode)
   };
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
@@ -1367,6 +1465,11 @@ function parseTomlBool(value) {
   return String(value).toLowerCase() === "true";
 }
 
+function normalizeBuddyMode(value) {
+  const mode = String(value || "cursor").toLowerCase();
+  return ["cursor", "corner", "off"].includes(mode) ? mode : "cursor";
+}
+
 ipcMain.handle("state:get", () => getState());
 ipcMain.handle("config:saveTunnel", (_event, tunnelBaseUrl) => {
   const next = saveConfig({ tunnelBaseUrl });
@@ -1395,6 +1498,11 @@ ipcMain.handle("config:saveDirectModel", (_event, nextConfig) => {
   publishState({ statusMessage: directModelEnabled() ? "OpenAI 直连已启用" : "OpenAI 直连未完整配置" });
   return next;
 });
+ipcMain.handle("config:saveBuddyMode", (_event, mode) => {
+  const next = saveConfig({ buddyDefaultMode: normalizeBuddyMode(mode) });
+  publishState({ config: next });
+  return next;
+});
 ipcMain.handle("memory:syncToday", async () => {
   const write = ensureDayFiles(localDay());
   const message = await syncMemory(write, lastObservation);
@@ -1411,6 +1519,8 @@ ipcMain.handle("chat:close", () => {
   if (chatWindow && !chatWindow.isDestroyed()) chatWindow.close();
 });
 ipcMain.handle("buddy:typewriter", (_event, text) => showTypewriterNearCursor(String(text || ""), { autoCloseMs: 12000 }));
+ipcMain.handle("buddy:summonType", () => requestTypingNearCursor());
+ipcMain.handle("buddy:summonGuide", () => requestGuidanceNearCursor());
 ipcMain.handle("window:minimize", () => mainWindow?.minimize());
 ipcMain.handle("window:hide", () => mainWindow?.hide());
 ipcMain.handle("window:close", () => app.quit());

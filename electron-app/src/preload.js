@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("screenMemory", {
   getState: () => ipcRenderer.invoke("state:get"),
   saveTunnel: (url) => ipcRenderer.invoke("config:saveTunnel", url),
   saveDirectModel: (config) => ipcRenderer.invoke("config:saveDirectModel", config),
+  saveBuddyMode: (mode) => ipcRenderer.invoke("config:saveBuddyMode", mode),
   syncToday: () => ipcRenderer.invoke("memory:syncToday"),
   packageMemory: (scope) => ipcRenderer.invoke("memory:package", scope),
   importMemoryPackage: () => ipcRenderer.invoke("memory:importPackage"),
@@ -18,6 +19,8 @@ contextBridge.exposeInMainWorld("screenMemory", {
   submitChat: (text) => ipcRenderer.invoke("chat:submit", text),
   closeChat: () => ipcRenderer.invoke("chat:close"),
   showTypewriter: (text) => ipcRenderer.invoke("buddy:typewriter", text),
+  summonType: () => ipcRenderer.invoke("buddy:summonType"),
+  summonGuide: () => ipcRenderer.invoke("buddy:summonGuide"),
   onStateUpdate: (handler) => {
     ipcRenderer.on("state:update", (_event, state) => handler(state));
   },

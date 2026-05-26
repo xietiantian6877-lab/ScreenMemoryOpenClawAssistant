@@ -15,6 +15,7 @@ const syncText = document.getElementById("syncText");
 const packageText = document.getElementById("packageText");
 const petFace = document.getElementById("petFace");
 const petCard = document.getElementById("petCard");
+const buddyModeSelect = document.getElementById("buddyModeSelect");
 
 let isCollapsed = false;
 
@@ -39,6 +40,10 @@ document.getElementById("packageTodayBtn").addEventListener("click", () => packa
 document.getElementById("packageWeekBtn").addEventListener("click", () => packageMemory("week"));
 document.getElementById("packageAllBtn").addEventListener("click", () => packageMemory("all"));
 document.getElementById("importPackageBtn").addEventListener("click", importMemoryPackage);
+buddyModeSelect.addEventListener("change", async () => {
+  const config = await window.screenMemory.saveBuddyMode(buddyModeSelect.value);
+  renderConfig(config);
+});
 
 sendBtn.addEventListener("click", submitComposer);
 composerInput.addEventListener("keydown", (event) => {
@@ -147,6 +152,7 @@ function renderConfig(config) {
   if (document.activeElement !== directBaseUrlInput) directBaseUrlInput.value = config?.directBaseUrl || "";
   if (document.activeElement !== directModelInput) directModelInput.value = config?.directModel || "gpt-5.5";
   if (document.activeElement !== directReviewModelInput) directReviewModelInput.value = config?.directReviewModel || "gpt-5.4";
+  if (document.activeElement !== buddyModeSelect) buddyModeSelect.value = config?.buddyDefaultMode || "cursor";
 
   if (config?.directEnabled) {
     connectionText.textContent = "OpenAI 直连";
