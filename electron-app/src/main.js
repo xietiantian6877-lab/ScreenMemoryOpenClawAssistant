@@ -39,7 +39,8 @@ const DEFAULT_CONFIG = {
   buddyDefaultMode: "cursor",
   companionMode: "watch",
   proactiveGuidance: false,
-  casualChat: true
+  casualChat: true,
+  casualChatFrequency: 35
 };
 
 const TYPEWRITER_WIDTH = 300;
@@ -1037,8 +1038,11 @@ function maybeAskBlocked(observation) {
 function maybeCasualChat(observation) {
   if (!config.casualChat) return;
   const now = Date.now();
-  if (now - lastCasualChatAt < 3 * 60000) return;
-  if (Math.random() > 0.22) return;
+  const frequency = normalizeFrequency(config.casualChatFrequency);
+  const minGapMs = (130 - frequency) * 1000;
+  const probability = Math.min(0.9, Math.max(0.05, frequency / 100));
+  if (now - lastCasualChatAt < minGapMs) return;
+  if (Math.random() > probability) return;
   lastCasualChatAt = now;
   const message = casualCommentForObservation(observation);
   if (message) {
@@ -1069,6 +1073,12 @@ function casualCommentForObservation(observation) {
     return "你在设置里转悠，我先安静看着。";
   }
   return "我在看着你的屏幕，先不指导你，就陪你工作一会儿。";
+}
+
+function normalizeFrequency(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 35;
+  return Math.max(0, Math.min(100, number));
 }
 
 function createChatWindow(prompt) {
@@ -1764,7 +1774,8 @@ function publicConfig() {
     buddyDefaultMode: config.buddyDefaultMode,
     companionMode: config.companionMode,
     proactiveGuidance: config.proactiveGuidance,
-    casualChat: config.casualChat
+    casualChat: config.casualChat,
+    casualChatFrequency: normalizeFrequency(config.casualChatFrequency)
   };
 }
 
@@ -1787,9 +1798,10 @@ function saveConfig(nextConfig) {
   config = {
     ...merged,
   tunnelBaseUrl: String(merged.tunnelBaseUrl || "").trim().replace(/\/+$/, ""),
-  directBaseUrl: String(merged.directBaseUrl || "").trim().replace(/\/+$/, ""),
+    directBaseUrl: String(merged.directBaseUrl || "").trim().replace(/\/+$/, ""),
     directApiKey: String(merged.directApiKey || "").trim(),
-    buddyDefaultMode: normalizeBuddyMode(merged.buddyDefaultMode)
+    buddyDefaultMode: normalizeBuddyMode(merged.buddyDefaultMode),
+    casualChatFrequency: normalizeFrequency(merged.casualChatFrequency)
   };
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
@@ -1809,6 +1821,7 @@ blocked_check_minutes = ${config.blockedCheckMinutes}
 companion_mode = "${config.companionMode || "watch"}"
 proactive_guidance = ${config.proactiveGuidance ? "true" : "false"}
 casual_chat = ${config.casualChat === false ? "false" : "true"}
+casual_chat_frequency = ${normalizeFrequency(config.casualChatFrequency)}
 memory_dir = "data/memory"
 language = "zh-CN"
 `;
@@ -1940,6 +1953,7 @@ function readRootTomlConfig() {
   if (assistantBlock.companion_mode) result.companionMode = String(assistantBlock.companion_mode);
   if (assistantBlock.proactive_guidance !== undefined) result.proactiveGuidance = parseTomlBool(assistantBlock.proactive_guidance);
   if (assistantBlock.casual_chat !== undefined) result.casualChat = parseTomlBool(assistantBlock.casual_chat);
+  if (assistantBlock.casual_chat_frequency !== undefined) result.casualChatFrequency = Number(assistantBlock.casual_chat_frequency);
   const screenBlock = readTomlBlock(text, "screen");
   if (screenBlock.enable_screenshot !== undefined) result.sendScreenshotsToModel = parseTomlBool(screenBlock.enable_screenshot);
   if (directApiKey) result.directApiKey = directApiKey;
@@ -2036,6 +2050,11 @@ ipcMain.handle("config:saveBuddyMode", (_event, mode) => {
     hideCursorBuddy();
     if (typewriterWindow && !typewriterWindow.isDestroyed()) typewriterWindow.close();
   }
+  publishState({ config: next });
+  return next;
+});
+ipcMain.handle("config:saveCasualChatFrequency", (_event, value) => {
+  const next = saveConfig({ casualChatFrequency: normalizeFrequency(value), casualChat: Number(value) > 0 });
   publishState({ config: next });
   return next;
 });

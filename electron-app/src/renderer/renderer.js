@@ -16,6 +16,8 @@ const packageText = document.getElementById("packageText");
 const petFace = document.getElementById("petFace");
 const petCard = document.getElementById("petCard");
 const buddyModeSelect = document.getElementById("buddyModeSelect");
+const chatFrequencyInput = document.getElementById("chatFrequencyInput");
+const chatFrequencyText = document.getElementById("chatFrequencyText");
 
 let isCollapsed = false;
 
@@ -42,6 +44,13 @@ document.getElementById("packageAllBtn").addEventListener("click", () => package
 document.getElementById("importPackageBtn").addEventListener("click", importMemoryPackage);
 buddyModeSelect.addEventListener("change", async () => {
   const config = await window.screenMemory.saveBuddyMode(buddyModeSelect.value);
+  renderConfig(config);
+});
+chatFrequencyInput.addEventListener("input", () => {
+  chatFrequencyText.textContent = `${chatFrequencyInput.value}%`;
+});
+chatFrequencyInput.addEventListener("change", async () => {
+  const config = await window.screenMemory.saveCasualChatFrequency(Number(chatFrequencyInput.value));
   renderConfig(config);
 });
 
@@ -153,6 +162,9 @@ function renderConfig(config) {
   if (document.activeElement !== directModelInput) directModelInput.value = config?.directModel || "gpt-5.5";
   if (document.activeElement !== directReviewModelInput) directReviewModelInput.value = config?.directReviewModel || "gpt-5.4";
   if (document.activeElement !== buddyModeSelect) buddyModeSelect.value = config?.buddyDefaultMode || "cursor";
+  const frequency = Number(config?.casualChatFrequency ?? 35);
+  if (document.activeElement !== chatFrequencyInput) chatFrequencyInput.value = String(frequency);
+  chatFrequencyText.textContent = `${frequency}%`;
 
   if (config?.directEnabled) {
     connectionText.textContent = "OpenAI 直连";
