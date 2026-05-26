@@ -3,8 +3,12 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("screenMemory", {
   getState: () => ipcRenderer.invoke("state:get"),
   saveTunnel: (url) => ipcRenderer.invoke("config:saveTunnel", url),
+  saveDirectModel: (config) => ipcRenderer.invoke("config:saveDirectModel", config),
   syncToday: () => ipcRenderer.invoke("memory:syncToday"),
+  packageMemory: (scope) => ipcRenderer.invoke("memory:package", scope),
+  importMemoryPackage: () => ipcRenderer.invoke("memory:importPackage"),
   openMemoryFolder: () => ipcRenderer.invoke("memory:openFolder"),
+  openPackagesFolder: () => ipcRenderer.invoke("memory:openPackagesFolder"),
   testBlockedPopup: () => ipcRenderer.invoke("debug:testBlockedPopup"),
   minimize: () => ipcRenderer.invoke("window:minimize"),
   hide: () => ipcRenderer.invoke("window:hide"),
@@ -13,6 +17,7 @@ contextBridge.exposeInMainWorld("screenMemory", {
   setWindowMode: (mode) => ipcRenderer.invoke("window:setMode", mode),
   submitChat: (text) => ipcRenderer.invoke("chat:submit", text),
   closeChat: () => ipcRenderer.invoke("chat:close"),
+  showTypewriter: (text) => ipcRenderer.invoke("buddy:typewriter", text),
   onStateUpdate: (handler) => {
     ipcRenderer.on("state:update", (_event, state) => handler(state));
   },

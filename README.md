@@ -1,76 +1,87 @@
 # Screen Memory OpenClaw Assistant
 
-一个 Windows 本地桌面助手原型：定时识别屏幕和当前活动窗口，写入每天的记忆；如果判断你可能卡住，会在鼠标旁边弹出一个输入框；也会周期性在右下角弹出状态消息。
+Windows 本地桌面助手原型：定时识别当前活动窗口，写入每日记忆；当判断你可能不知道下一步怎么操作时，会在鼠标旁边逐字打出建议，并弹出轻量输入框。Electron 版本参考 Clicky 的“桌面伙伴”形态，支持悬浮入口、系统托盘、任务栏状态徽标、OpenAI 直连和记忆包导出。
 
-OpenClaw 目前预留为 HTTP 接口。你只需要在界面里填写一个隧穿地址，助手会用它连接 OpenClaw，并把每天的记忆文件同步回去。
-
-## 快速启动
+## 启动
 
 ```powershell
 cd E:\ScreenMemoryOpenClawAssistant
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-copy config.example.toml config.toml
-python -m screen_memory_assistant
-```
-
-新版无边框 Electron 界面启动方式：
-
-```powershell
 E:\ScreenMemoryOpenClawAssistant\start-electron.ps1
 ```
 
-也可以直接双击：
+也可以双击：
 
 ```text
 E:\ScreenMemoryOpenClawAssistant\open-app.vbs
 ```
 
-如果需要查看开发日志：
+开发日志：
 
 ```powershell
 E:\ScreenMemoryOpenClawAssistant\start-electron-dev.ps1
 ```
 
-运行后会在后台每隔一段时间观察一次屏幕。记忆默认写到：
+## OpenAI 直连
+
+根目录 `config.toml` 支持这组 Codex 风格配置，手动修改后重启 Electron 即生效。API key 不建议写进仓库文件，优先用 `OPENAI_API_KEY` 或在界面里保存到本地 `data/electron-config.json`。
+
+```toml
+model_provider = "OpenAI"
+model = "gpt-5.5"
+review_model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
+disable_response_storage = true
+network_access = "enabled"
+windows_wsl_setup_acknowledged = true
+model_context_window = 1000000
+model_auto_compact_token_limit = 900000
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "https://fast.allincoding.cc"
+wire_api = "responses"
+requires_openai_auth = true
+```
+
+Electron 会使用 `wire_api = "responses"` 调用 `POST /v1/responses`。`model_reasoning_effort = "xhigh"` 会按配置原样发送；如果后端不接受，会自动回退到 `high` 再试一次。
+
+## 鼠标旁打字回复
+
+参考 Clicky 的语音回复体验，但这里不启用语音/TTS：模型回复会显示在当前 Windows 鼠标旁边的透明小气泡里，并逐字打出来。这个窗口不抢焦点，也会把鼠标事件透传给下面的应用。
+
+## 记忆文件和记忆包
+
+每日记忆写到：
 
 ```text
 E:\ScreenMemoryOpenClawAssistant\data\memory\YYYY-MM-DD.jsonl
 E:\ScreenMemoryOpenClawAssistant\data\memory\YYYY-MM-DD.md
 ```
 
-## 填写隧穿地址
+界面里有多个打包按钮：
 
-打开软件界面后，在“隧穿地址”里填写：
+- `#`：打包今日记忆
+- `7天包`：打包最近 7 天
+- `全部包`：打包全部记忆
+- `导入包`：把另一台 OpenClaw 电脑带回来的记忆包写入本机记忆目录
+
+记忆包输出到：
 
 ```text
-https://你的隧穿地址
+E:\ScreenMemoryOpenClawAssistant\data\memory_packages
 ```
 
-或者编辑 `config.toml`：
+## 可选隧穿
+
+仍然保留 OpenClaw HTTP 隧穿接口：
 
 ```toml
 [tunnel]
 base_url = "https://你的隧穿地址"
 ```
 
-也可以启动时传入：
-
-```powershell
-.\run.ps1 -TunnelBaseUrl "https://你的隧穿地址"
-```
-
-助手会尝试调用：
-
-- `POST /observe`：发送屏幕上下文，期望返回 `summary`、`blocked`、`message`
-- `POST /chat`：发送你在弹窗里输入的内容，期望返回 `reply`
-- `POST /memory/sync`：同步当天的 `.md` 和 `.jsonl` 记忆文件
-
-如果 OpenClaw 不在线，程序会自动使用本地启发式判断，不会中断。
+接口为 `POST /observe`、`POST /chat`、`POST /memory/sync`。如果配置了 OpenAI 直连，会优先直连模型；否则使用隧穿；两者都没有时使用本地启发式判断。
 
 ## 注意
 
-- 截图默认只保存在内存里，不落盘；写入记忆的是窗口标题、进程名、OCR 文本摘要和 OpenClaw/本地判断。
-- OCR 依赖本机 Tesseract。没安装也能运行，只是不会识别截图文字。
-- 这个项目会读取屏幕内容，请只在你信任的电脑和配置下运行。
+这个项目会读取活动窗口标题和可选截图上下文。默认不把截图写入磁盘；如启用截图发给模型，请只在你信任的电脑和网络配置下运行。

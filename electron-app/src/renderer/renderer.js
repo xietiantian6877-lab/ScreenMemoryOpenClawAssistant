@@ -1,33 +1,44 @@
 const appShell = document.getElementById("appShell");
 const composerInput = document.getElementById("composerInput");
 const tunnelInput = document.getElementById("tunnelInput");
+const directBaseUrlInput = document.getElementById("directBaseUrlInput");
+const directApiKeyInput = document.getElementById("directApiKeyInput");
+const directModelInput = document.getElementById("directModelInput");
+const directReviewModelInput = document.getElementById("directReviewModelInput");
 const sendBtn = document.getElementById("sendBtn");
 const saveTunnelBtn = document.getElementById("saveTunnelBtn");
+const saveDirectBtn = document.getElementById("saveDirectBtn");
 const connectionText = document.getElementById("connectionText");
 const settingsStatus = document.getElementById("settingsStatus");
 const windowText = document.getElementById("windowText");
 const syncText = document.getElementById("syncText");
+const packageText = document.getElementById("packageText");
 const petFace = document.getElementById("petFace");
-
-// Collapse/Expand functionality
 const petCard = document.getElementById("petCard");
-const collapseBtn = document.getElementById("collapseBtn");
-const expandBtn = document.getElementById("expandBtn");
 
-collapseBtn.addEventListener("click", async () => {
-  appShell.classList.add("collapsed");
-  await window.screenMemory.toggleCollapse(true);
+let isCollapsed = false;
+
+async function setCollapsed(collapsed) {
+  isCollapsed = collapsed;
+  appShell.classList.toggle("collapsed", collapsed);
+  await window.screenMemory.toggleCollapse(collapsed);
+}
+
+petFace.addEventListener("click", () => setCollapsed(!isCollapsed));
+petCard.addEventListener("click", (event) => {
+  if (event.target === petFace || event.target === petCard) setCollapsed(!isCollapsed);
 });
 
-expandBtn.addEventListener("click", async () => {
-  appShell.classList.remove("collapsed");
-  await window.screenMemory.toggleCollapse(false);
-});
 document.getElementById("openMemoryBtn").addEventListener("click", () => window.screenMemory.openMemoryFolder());
 document.getElementById("openMemoryBtnSettings").addEventListener("click", () => window.screenMemory.openMemoryFolder());
+document.getElementById("openPackagesBtn").addEventListener("click", () => window.screenMemory.openPackagesFolder());
 document.getElementById("testPopupBtn").addEventListener("click", () => window.screenMemory.testBlockedPopup());
 document.getElementById("settingsBtn").addEventListener("click", () => setSettingsOpen(true));
 document.getElementById("settingsBackBtn").addEventListener("click", () => setSettingsOpen(false));
+document.getElementById("packageTodayBtn").addEventListener("click", () => packageMemory("today"));
+document.getElementById("packageWeekBtn").addEventListener("click", () => packageMemory("week"));
+document.getElementById("packageAllBtn").addEventListener("click", () => packageMemory("all"));
+document.getElementById("importPackageBtn").addEventListener("click", importMemoryPackage);
 
 sendBtn.addEventListener("click", submitComposer);
 composerInput.addEventListener("keydown", (event) => {
@@ -37,6 +48,11 @@ composerInput.addEventListener("keydown", (event) => {
 saveTunnelBtn.addEventListener("click", saveTunnel);
 tunnelInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") saveTunnel();
+});
+
+saveDirectBtn.addEventListener("click", saveDirectModel);
+directApiKeyInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") saveDirectModel();
 });
 
 document.getElementById("syncTodayBtn").addEventListener("click", async () => {
@@ -51,7 +67,7 @@ async function submitComposer() {
   const value = composerInput.value.trim();
   if (!value) return;
   sendBtn.disabled = true;
-  sendBtn.textContent = "…";
+  sendBtn.textContent = "...";
   petFace.textContent = "(•_•)";
   await window.screenMemory.submitChat(value);
   composerInput.value = "";
@@ -65,30 +81,87 @@ async function saveTunnel() {
   saveTunnelBtn.textContent = "保存中";
   const config = await window.screenMemory.saveTunnel(tunnelInput.value.trim());
   renderConfig(config);
-  saveTunnelBtn.textContent = "保存";
+  saveTunnelBtn.textContent = "保存隧穿";
   saveTunnelBtn.disabled = false;
+}
+
+async function saveDirectModel() {
+  saveDirectBtn.disabled = true;
+  saveDirectBtn.textContent = "保存中";
+  const config = await window.screenMemory.saveDirectModel({
+    directModelProvider: "OpenAI",
+    directBaseUrl: directBaseUrlInput.value.trim(),
+    directApiKey: directApiKeyInput.value.trim(),
+    directModel: directModelInput.value.trim() || "gpt-5.5",
+    directReviewModel: directReviewModelInput.value.trim() || "gpt-5.4",
+    directReasoningEffort: "xhigh",
+    directWireApi: "responses",
+    disableResponseStorage: true,
+    networkAccess: "enabled",
+    windowsWslSetupAcknowledged: true,
+    modelContextWindow: 1000000,
+    modelAutoCompactTokenLimit: 900000
+  });
+  directApiKeyInput.value = "";
+  renderConfig(config);
+  saveDirectBtn.textContent = "保存直连";
+  saveDirectBtn.disabled = false;
+}
+
+async function packageMemory(scope) {
+  packageText.textContent = "打包中";
+  try {
+    const result = await window.screenMemory.packageMemory(scope);
+    packageText.textContent = result.message || "已打包";
+  } catch (error) {
+    packageText.textContent = "打包失败";
+  }
+}
+
+async function importMemoryPackage() {
+  packageText.textContent = "导入中";
+  try {
+    const result = await window.screenMemory.importMemoryPackage();
+    packageText.textContent = result.message || "已导入";
+  } catch (error) {
+    packageText.textContent = "导入失败";
+  }
 }
 
 function renderState(state) {
   renderConfig(state.config);
   if (state.syncMessage) syncText.textContent = compactSyncText(state.syncMessage);
+  if (state.packageMessage) packageText.textContent = state.packageMessage;
 
   if (state.observation) {
     const process = state.observation.active_process || "未知进程";
     const title = state.observation.active_window_title || "未知窗口";
     windowText.textContent = `识别屏幕：${process} · ${title}`;
-    petFace.textContent = state.observation.blocked ? "(•̀_•́)" : "(•‿•)";
+    petFace.textContent = state.observation.blocked ? "(•_•?)" : "(•‿•)";
   }
 }
 
 function renderConfig(config) {
-  const url = config?.tunnelBaseUrl || "";
-  if (document.activeElement !== tunnelInput) tunnelInput.value = url;
-  connectionText.textContent = url ? "已连接" : "未填写地址";
-  settingsStatus.textContent = url ? "隧穿已保存" : "未填写地址";
+  const tunnelUrl = config?.tunnelBaseUrl || "";
+  if (document.activeElement !== tunnelInput) tunnelInput.value = tunnelUrl;
+  if (document.activeElement !== directBaseUrlInput) directBaseUrlInput.value = config?.directBaseUrl || "";
+  if (document.activeElement !== directModelInput) directModelInput.value = config?.directModel || "gpt-5.5";
+  if (document.activeElement !== directReviewModelInput) directReviewModelInput.value = config?.directReviewModel || "gpt-5.4";
+
+  if (config?.directEnabled) {
+    connectionText.textContent = "OpenAI 直连";
+    settingsStatus.textContent = `${config.directModelProvider || "OpenAI"} ${config.directModel || ""}`;
+  } else if (tunnelUrl) {
+    connectionText.textContent = "隧穿已连接";
+    settingsStatus.textContent = "OpenClaw 隧穿";
+  } else {
+    connectionText.textContent = "本地判断";
+    settingsStatus.textContent = "未配置直连/隧穿";
+  }
 }
 
 function compactSyncText(text) {
+  if (!text) return "未同步";
   if (text.includes("已同步")) return "已同步";
   if (text.includes("失败")) return "同步失败";
   if (text.includes("未填写")) return "未同步";
@@ -100,6 +173,6 @@ async function setSettingsOpen(open) {
   if (window.screenMemory.setWindowMode) {
     await window.screenMemory.setWindowMode(open ? "settings" : "composer");
   }
-  if (open) tunnelInput.focus();
+  if (open) directApiKeyInput.focus();
   else composerInput.focus();
 }

@@ -115,7 +115,9 @@ def load_config(root_dir: Path | None = None) -> AppConfig:
 def save_tunnel_address(config: AppConfig, base_url: str) -> None:
     base_url = base_url.strip().rstrip("/")
     memory_dir = _to_config_path(config.root_dir, config.assistant.memory_dir)
-    content = f"""[assistant]
+    existing = (config.root_dir / "config.toml").read_text(encoding="utf-8") if (config.root_dir / "config.toml").exists() else ""
+    direct_prefix = _direct_model_prefix(existing)
+    content = f"""{direct_prefix}[assistant]
 observe_interval_seconds = {config.assistant.observe_interval_seconds}
 notify_interval_minutes = {config.assistant.notify_interval_minutes}
 blocked_check_minutes = {config.assistant.blocked_check_minutes}
@@ -154,3 +156,10 @@ def _to_config_path(root_dir: Path, path: Path) -> str:
         return path.relative_to(root_dir).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _direct_model_prefix(content: str) -> str:
+    if "[assistant]" not in content:
+        return ""
+    prefix = content.split("[assistant]", 1)[0].strip()
+    return f"{prefix}\n\n" if prefix else ""
