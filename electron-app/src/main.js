@@ -1,11 +1,10 @@
 const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage, dialog, desktopCapturer, globalShortcut, net } = require("electron");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const https = require("https");
 const path = require("path");
 const os = require("os");
-const netNode = require("net");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 const DATA_DIR = path.join(PROJECT_ROOT, "data");
@@ -65,10 +64,13 @@ let lastNotifyAt = 0;
 let lastBlockPromptAt = 0;
 let lastSyncMessage = "";
 let lastPackageMessage = "";
-let typewriterFollowState = { lastX: 0, lastY: 0, stillSince: 0, avoidIme: false };
+let cursorProbeProcess = null;
+let cursorProbeBuffer = "";
+let isIBeamActive = false;
 
 app.whenReady().then(() => {
   app.setAppUserModelId("ScreenMemory.OpenClawAssistant");
+  setupCursorDetection();
   fs.mkdirSync(MEMORY_DIR, { recursive: true });
   fs.mkdirSync(PACKAGES_DIR, { recursive: true });
   createMainWindow();
@@ -80,6 +82,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   stopObserver();
   stopCursorBuddy();
+  stopCursorDetection();
   globalShortcut.unregisterAll();
   if (process.platform !== "darwin") app.quit();
 });
@@ -1207,8 +1210,6 @@ function resizeTypewriterWindow(bounds = {}) {
 
 function startTypewriterFollow() {
   stopTypewriterFollow();
-  const cursor = screen.getCursorScreenPoint();
-  typewriterFollowState = { lastX: cursor.x, lastY: cursor.y, stillSince: Date.now(), avoidIme: false };
   typewriterFollowTimer = setInterval(() => {
     if (!typewriterWindow || typewriterWindow.isDestroyed()) {
       stopTypewriterFollow();
@@ -1224,20 +1225,63 @@ function stopTypewriterFollow() {
 }
 
 function shouldAvoidIme() {
-  const cursor = screen.getCursorScreenPoint();
-  const now = Date.now();
-  const moved = Math.abs(cursor.x - typewriterFollowState.lastX) + Math.abs(cursor.y - typewriterFollowState.lastY);
-  if (moved > 10) {
-    typewriterFollowState.lastX = cursor.x;
-    typewriterFollowState.lastY = cursor.y;
-    typewriterFollowState.stillSince = now;
-    typewriterFollowState.avoidIme = false;
-    return false;
+  return isIBeamCursor();
+}
+
+function setupCursorDetection() {
+  if (process.platform !== "win32" || cursorProbeProcess) return;
+  const script = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class CursorProbe {
+  [StructLayout(LayoutKind.Sequential)] public struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public POINT ptScreenPos; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int x; public int y; }
+  [DllImport("user32.dll")] public static extern bool GetCursorInfo(out CURSORINFO pci);
+  [DllImport("user32.dll")] public static extern IntPtr LoadCursor(IntPtr hInstance, int lpCursorName);
+}
+"@ -ErrorAction SilentlyContinue
+$ibeam = [CursorProbe]::LoadCursor([IntPtr]::Zero, 32513)
+$last = $null
+while ($true) {
+  $info = New-Object CursorProbe+CURSORINFO
+  $info.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($info)
+  [void][CursorProbe]::GetCursorInfo([ref]$info)
+  $active = ($info.hCursor -eq $ibeam)
+  if ($active -ne $last) {
+    if ($active) { [Console]::Out.WriteLine("ibeam=1") } else { [Console]::Out.WriteLine("ibeam=0") }
+    [Console]::Out.Flush()
+    $last = $active
   }
-  if (!typewriterFollowState.avoidIme && now - typewriterFollowState.stillSince > 900) {
-    typewriterFollowState.avoidIme = true;
+  Start-Sleep -Milliseconds 80
+}
+`;
+  cursorProbeProcess = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { windowsHide: true });
+  cursorProbeProcess.stdout.on("data", (chunk) => {
+    cursorProbeBuffer += chunk.toString("utf8");
+    const lines = cursorProbeBuffer.split(/\r?\n/);
+    cursorProbeBuffer = lines.pop() || "";
+    for (const line of lines) {
+      if (line.includes("ibeam=1")) isIBeamActive = true;
+      if (line.includes("ibeam=0")) isIBeamActive = false;
+    }
+  });
+  cursorProbeProcess.on("exit", () => {
+    cursorProbeProcess = null;
+    isIBeamActive = false;
+  });
+}
+
+function stopCursorDetection() {
+  if (cursorProbeProcess) {
+    cursorProbeProcess.kill();
+    cursorProbeProcess = null;
   }
-  return typewriterFollowState.avoidIme;
+  isIBeamActive = false;
+}
+
+function isIBeamCursor() {
+  return isIBeamActive;
 }
 
 function positionWindow(window, corner, margin = 18, nearCursor = false) {
