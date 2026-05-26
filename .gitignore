@@ -1,6 +1,8 @@
 .venv/
+node_modules/
 __pycache__/
 *.pyc
 .pytest_cache/
 data/
 config.toml
+electron-app/node_modules/

@@ -1,0 +1,13 @@
+{
+  "name": "screen-memory-openclaw-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frameless Electron UI for screen memory and OpenClaw tunnel sync.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^38.3.0"
+  }
+}

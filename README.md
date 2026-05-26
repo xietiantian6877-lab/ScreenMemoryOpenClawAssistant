@@ -15,6 +15,24 @@ copy config.example.toml config.toml
 python -m screen_memory_assistant
 ```
 
+新版无边框 Electron 界面启动方式：
+
+```powershell
+E:\ScreenMemoryOpenClawAssistant\start-electron.ps1
+```
+
+也可以直接双击：
+
+```text
+E:\ScreenMemoryOpenClawAssistant\open-app.vbs
+```
+
+如果需要查看开发日志：
+
+```powershell
+E:\ScreenMemoryOpenClawAssistant\start-electron-dev.ps1
+```
+
 运行后会在后台每隔一段时间观察一次屏幕。记忆默认写到：
 
 ```text
