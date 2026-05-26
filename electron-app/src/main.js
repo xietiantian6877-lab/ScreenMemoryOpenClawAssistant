@@ -50,13 +50,14 @@ function createMainWindow() {
   const bounds = getAnchoredBounds(760, 108, "bottom-right", 18);
   mainWindow = new BrowserWindow({
     ...bounds,
-    minWidth: 520,
+    minWidth: 92,
     minHeight: 92,
     frame: false,
     transparent: true,
     hasShadow: true,
     show: false,
-    skipTaskbar: true,
+    skipTaskbar: false,
+    icon: path.join(__dirname, "icon.png"),
     backgroundColor: "#00000000",
     title: "屏幕记忆助手",
     webPreferences: {
@@ -410,7 +411,13 @@ function showToast(title, message) {
   toastWindow.loadFile(path.join(__dirname, "toast", "toast.html"), { query: Object.fromEntries(query) });
   toastWindow.once("ready-to-show", () => {
     positionWindow(toastWindow, "top-right", 18);
-    toastWindow.showInactive();
+    if (toastWindow && !toastWindow.isDestroyed()) {
+      try {
+        toastWindow.showInactive();
+      } catch (e) {
+        toastWindow.show();
+      }
+    }
   });
   toastWindow.on("closed", () => {
     toastWindow = null;
