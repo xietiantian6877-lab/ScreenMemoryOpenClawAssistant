@@ -11,7 +11,7 @@ model_auto_compact_token_limit = 900000
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "https://fast.allincoding.cc"
-wire_api = "responses"
+wire_api = "auto"
 requires_openai_auth = true
 
 [assistant]

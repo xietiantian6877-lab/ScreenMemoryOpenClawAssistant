@@ -66,13 +66,13 @@ model_auto_compact_token_limit = 900000
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "https://fast.allincoding.cc"
-wire_api = "responses"
+wire_api = "auto"
 requires_openai_auth = true
 ```
 
-Electron 会使用 `wire_api = "responses"` 调用 `POST /v1/responses`。`model_reasoning_effort = "xhigh"` 会按配置原样发送；如果后端不接受，会自动回退到 `high` 再试一次。
+Electron 支持 `wire_api = "responses"`、`"chat"` 或 `"auto"`。`responses` 调用 `POST /v1/responses`，`chat` 调用 `POST /v1/chat/completions`，`auto` 会先试 Responses，失败后再试 Chat Completions，适合 sub2api 这类中转站。
 
-如果界面提示 `read ECONNRESET`，通常不是 API key 没保存，而是服务端或网络中途重置连接。应用会对连接重置自动重试一次；如果你刚保存过密钥或改过模型，请先按上面的命令重启旧 Electron 进程。
+如果界面提示 `read ECONNRESET`，通常不是 API key 没保存，而是 `base_url` 服务或网络代理中途重置连接。应用会对连接重置自动重试一次；如果持续失败，先重启旧 Electron 进程，再确认 `https://fast.allincoding.cc/v1/responses` 当前是否可用，或换一个可用的 `base_url/model`。
 
 ## Clicky 风格指导
 

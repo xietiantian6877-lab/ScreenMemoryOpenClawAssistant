@@ -21,8 +21,10 @@ let isCollapsed = false;
 
 async function setCollapsed(collapsed) {
   isCollapsed = collapsed;
+  appShell.classList.remove("settings-open");
   appShell.classList.toggle("collapsed", collapsed);
   await window.screenMemory.toggleCollapse(collapsed);
+  if (!collapsed) composerInput.focus();
 }
 
 petCard.addEventListener("click", () => setCollapsed(!isCollapsed));
@@ -98,7 +100,7 @@ async function saveDirectModel() {
     directModel: directModelInput.value.trim() || "gpt-5.5",
     directReviewModel: directReviewModelInput.value.trim() || "gpt-5.4",
     directReasoningEffort: "xhigh",
-    directWireApi: "responses",
+    directWireApi: "auto",
     disableResponseStorage: true,
     networkAccess: "enabled",
     windowsWslSetupAcknowledged: true,

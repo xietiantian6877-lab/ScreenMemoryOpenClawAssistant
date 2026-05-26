@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage, dialog, desktopCapturer, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage, dialog, desktopCapturer, globalShortcut, net } = require("electron");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const https = require("https");
 const path = require("path");
 const os = require("os");
+const netNode = require("net");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 const DATA_DIR = path.join(PROJECT_ROOT, "data");
@@ -37,6 +38,10 @@ const DEFAULT_CONFIG = {
   buddyDefaultMode: "cursor"
 };
 
+const TYPEWRITER_WIDTH = 300;
+const TYPEWRITER_HEIGHT = 112;
+const TYPEWRITER_POINTER_PAD = 18;
+
 let mainWindow = null;
 let chatWindow = null;
 let toastWindow = null;
@@ -58,6 +63,7 @@ let lastNotifyAt = 0;
 let lastBlockPromptAt = 0;
 let lastSyncMessage = "";
 let lastPackageMessage = "";
+let typewriterFollowState = { lastX: 0, lastY: 0, stillSince: 0, avoidIme: false };
 
 app.whenReady().then(() => {
   app.setAppUserModelId("ScreenMemory.OpenClawAssistant");
@@ -607,7 +613,32 @@ function getScreenGeometryText() {
 }
 
 async function callOpenAIResponses(body) {
-  const url = new URL("/v1/responses", config.directBaseUrl.replace(/\/+$/, ""));
+  const wireApi = normalizeWireApi(config.directWireApi);
+  if (wireApi === "chat") return callOpenAIChatCompletions(body);
+  if (wireApi === "auto") return callOpenAIAuto(body);
+  return callOpenAIResponsesOnly(body);
+}
+
+async function callOpenAIAuto(body) {
+  try {
+    return await callOpenAIResponsesOnly(body);
+  } catch (responsesError) {
+    if (isConnectionReset(responsesError)) throw responsesError;
+    try {
+      return await callOpenAIChatCompletions(body);
+    } catch (chatError) {
+      try {
+        return await callOpenAIChatCompletions(body, { textOnly: true });
+      } catch (compatError) {
+        compatError.message = `Responses 失败：${responsesError.message}; Chat Completions 失败：${chatError.message}; 兼容 Chat 失败：${compatError.message}`;
+        throw compatError;
+      }
+    }
+  }
+}
+
+async function callOpenAIResponsesOnly(body) {
+  const url = buildOpenAIUrl("/responses");
   const effort = normalizeReasoningEffort(config.directReasoningEffort);
   const payload = {
     model: body.model || config.directModel,
@@ -627,10 +658,87 @@ async function callOpenAIResponses(body) {
   try {
     return await requestJsonWithRetry(url, requestOptions);
   } catch (error) {
+    if (isInvalidArgumentError(error)) {
+      const compatPayload = {
+        model: payload.model,
+        input: textOnlyResponsesInput(body.input)
+      };
+      return requestJsonWithRetry(url, { ...requestOptions, body: JSON.stringify(compatPayload) });
+    }
     if (effort !== "xhigh") throw error;
+    if (isUnsupportedResponsesError(error)) throw error;
     const fallbackPayload = { ...payload, reasoning: { effort: "high" } };
     return requestJsonWithRetry(url, { ...requestOptions, body: JSON.stringify(fallbackPayload) });
   }
+}
+
+async function callOpenAIChatCompletions(body, options = {}) {
+  const payload = {
+    model: body.model || config.directModel,
+    messages: responsesInputToChatMessages(body.input, options),
+    stream: false
+  };
+  const requestOptions = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.directApiKey}`
+    },
+    body: JSON.stringify(payload),
+    timeoutMs: config.directTimeoutMs || 60000
+  };
+  return requestJsonWithRetry(buildOpenAIUrl("/chat/completions"), requestOptions);
+}
+
+function responsesInputToChatMessages(input, options = {}) {
+  return (Array.isArray(input) ? input : [{ role: "user", content: [{ type: "input_text", text: String(input || "") }] }]).map((message) => {
+    const role = message.role === "system" ? "system" : message.role === "assistant" ? "assistant" : "user";
+    const parts = Array.isArray(message.content) ? message.content : [{ type: "input_text", text: String(message.content || "") }];
+    const hasImage = parts.some((part) => part.type === "input_image" && part.image_url);
+    if (!hasImage || options.textOnly) {
+      return {
+        role,
+        content: parts
+          .filter((part) => part.type !== "input_image")
+          .map((part) => String(part.text || part.value || ""))
+          .filter(Boolean)
+          .join("\n")
+      };
+    }
+    return {
+      role,
+      content: parts
+        .map((part) => {
+          if (part.type === "input_image" && part.image_url) return { type: "image_url", image_url: { url: part.image_url } };
+          return { type: "text", text: String(part.text || part.value || "") };
+        })
+        .filter((part) => part.type === "image_url" || part.text)
+    };
+  });
+}
+
+function textOnlyResponsesInput(input) {
+  return (Array.isArray(input) ? input : [{ role: "user", content: [{ type: "input_text", text: String(input || "") }] }]).map((message) => ({
+    role: message.role || "user",
+    content: (Array.isArray(message.content) ? message.content : [{ type: "input_text", text: String(message.content || "") }])
+      .filter((part) => part.type !== "input_image")
+      .map((part) => ({ type: "input_text", text: String(part.text || part.value || "") }))
+      .filter((part) => part.text)
+  }));
+}
+
+function buildOpenAIUrl(endpoint) {
+  const base = String(config.directBaseUrl || "").replace(/\/+$/, "");
+  const normalizedEndpoint = `/${String(endpoint || "").replace(/^\/+/, "")}`;
+  if (/\/v1$/i.test(base)) return new URL(`${base}${normalizedEndpoint}`);
+  return new URL(`${base}/v1${normalizedEndpoint}`);
+}
+
+function normalizeWireApi(value) {
+  const wireApi = String(value || "responses").toLowerCase().replace(/[-_\s]+/g, "_");
+  if (["chat", "chat_completions", "completions"].includes(wireApi)) return "chat";
+  if (["auto", "both", "compat"].includes(wireApi)) return "auto";
+  return "responses";
 }
 
 function normalizeReasoningEffort(value) {
@@ -642,6 +750,8 @@ function normalizeReasoningEffort(value) {
 function extractResponseText(data) {
   if (!data) return "";
   if (typeof data.output_text === "string") return data.output_text.trim();
+  const chatText = data.choices?.[0]?.message?.content;
+  if (typeof chatText === "string") return chatText.trim();
   const parts = [];
   for (const item of data.output || []) {
     for (const content of item.content || []) {
@@ -671,7 +781,7 @@ function parseJsonFromModel(text) {
 function formatDirectModelError(error) {
   const message = String(error?.message || error || "");
   if (message.includes("ECONNRESET")) {
-    return "连接被重置，请检查 base_url、网络代理或服务端是否支持当前模型/参数。";
+    return "连接被服务端重置了。密钥已保存时，这通常是 base_url 服务、网络代理或当前模型/参数不可用；请稍后重试，或换一个可用的 base_url/model。";
   }
   if (message.includes("401") || message.toLowerCase().includes("unauthorized")) {
     return "密钥认证失败，请重新保存 OpenAI API key。";
@@ -701,11 +811,22 @@ function isConnectionReset(error) {
   return error?.code === "ECONNRESET" || message.includes("ECONNRESET");
 }
 
+function isInvalidArgumentError(error) {
+  const message = String(error?.message || error || "");
+  return message.includes("ERR_INVALID_ARGUMENT") || message.includes("400") || message.toLowerCase().includes("invalid argument");
+}
+
+function isUnsupportedResponsesError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("use /v1/responses") || message.includes("/v1/chat/completions is not supported") || message.includes("responses is not supported");
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function requestJson(url, options) {
+  if (net && app.isReady()) return requestJsonWithElectronNet(url, options);
   const target = url instanceof URL ? url : new URL(url);
   const client = target.protocol === "https:" ? https : http;
   const body = options.body || "";
@@ -741,6 +862,53 @@ function requestJson(url, options) {
     );
     request.on("timeout", () => request.destroy(new Error("请求超时")));
     request.on("error", reject);
+    if (body) request.write(body);
+    request.end();
+  });
+}
+
+function requestJsonWithElectronNet(url, options) {
+  const target = url instanceof URL ? url.toString() : String(url);
+  const body = options.body || "";
+  const headers = { ...(options.headers || {}) };
+  if (body && !headers["Content-Length"]) headers["Content-Length"] = String(Buffer.byteLength(body));
+
+  return new Promise((resolve, reject) => {
+    const request = net.request({
+      method: options.method || "GET",
+      url: target,
+      redirect: "follow"
+    });
+    for (const [key, value] of Object.entries(headers)) {
+      request.setHeader(key, String(value));
+    }
+    const timer = setTimeout(() => request.abort(), options.timeoutMs || 60000);
+    request.on("response", (response) => {
+      let raw = "";
+      response.on("data", (chunk) => {
+        raw += chunk.toString("utf8");
+      });
+      response.on("end", () => {
+        clearTimeout(timer);
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`${response.statusCode} ${response.statusMessage}: ${raw.slice(0, 300)}`));
+          return;
+        }
+        try {
+          resolve(raw ? JSON.parse(raw) : {});
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.on("abort", () => {
+      clearTimeout(timer);
+      reject(new Error("请求超时"));
+    });
+    request.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     if (body) request.write(body);
     request.end();
   });
@@ -915,7 +1083,9 @@ function showTypewriterNearCursor(message, options = {}) {
   }
   stopTypewriterFollow();
 
-  const bounds = mode === "corner" ? getCornerBuddyBounds(300, 112) : getCursorBuddyBounds(300, 112);
+  const bounds = mode === "corner"
+    ? getCornerBuddyBounds(TYPEWRITER_WIDTH + TYPEWRITER_POINTER_PAD, TYPEWRITER_HEIGHT)
+    : getCursorBuddyBounds(TYPEWRITER_WIDTH + TYPEWRITER_POINTER_PAD, TYPEWRITER_HEIGHT, { avoidIme: shouldAvoidIme(), pointerPad: TYPEWRITER_POINTER_PAD });
   typewriterWindow = new BrowserWindow({
     ...bounds,
     frame: false,
@@ -956,16 +1126,19 @@ function showTypewriterNearCursor(message, options = {}) {
   });
 }
 
-function getCursorBuddyBounds(preferredWidth, preferredHeight) {
+function getCursorBuddyBounds(preferredWidth, preferredHeight, options = {}) {
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
   const area = display.workArea;
   const width = Math.min(preferredWidth, Math.max(280, area.width - 24));
   const height = Math.min(preferredHeight, Math.max(120, area.height - 24));
-  let x = cursor.x + 22;
-  let y = cursor.y + 18;
-  if (x + width > area.x + area.width - 10) x = cursor.x - width - 22;
-  if (y + height > area.y + area.height - 10) y = cursor.y - height - 18;
+  const pointerPad = options.pointerPad || 0;
+  const nearOffsetX = options.avoidIme ? 18 : 12;
+  const nearOffsetY = options.avoidIme ? 92 : 12;
+  let x = cursor.x + nearOffsetX - pointerPad;
+  let y = cursor.y + nearOffsetY;
+  if (x + width > area.x + area.width - 10) x = cursor.x - width - nearOffsetX + pointerPad;
+  if (y + height > area.y + area.height - 10) y = cursor.y - height - (options.avoidIme ? 44 : 12);
   return {
     x: Math.max(area.x + 10, Math.min(x, area.x + area.width - width - 10)),
     y: Math.max(area.y + 10, Math.min(y, area.y + area.height - height - 10)),
@@ -986,10 +1159,10 @@ function getCornerBuddyBounds(preferredWidth, preferredHeight) {
   };
 }
 
-function positionNearCursor(window, margin = 12) {
+function positionNearCursor(window, margin = 12, options = {}) {
   if (!window || window.isDestroyed()) return;
   const current = window.getBounds();
-  const bounds = getCursorBuddyBounds(current.width, current.height);
+  const bounds = getCursorBuddyBounds(current.width, current.height, options);
   window.setBounds({
     x: bounds.x,
     y: bounds.y,
@@ -1000,18 +1173,37 @@ function positionNearCursor(window, margin = 12) {
 
 function startTypewriterFollow() {
   stopTypewriterFollow();
+  const cursor = screen.getCursorScreenPoint();
+  typewriterFollowState = { lastX: cursor.x, lastY: cursor.y, stillSince: Date.now(), avoidIme: false };
   typewriterFollowTimer = setInterval(() => {
     if (!typewriterWindow || typewriterWindow.isDestroyed()) {
       stopTypewriterFollow();
       return;
     }
-    positionNearCursor(typewriterWindow, 12);
+    positionNearCursor(typewriterWindow, 12, { avoidIme: shouldAvoidIme(), pointerPad: TYPEWRITER_POINTER_PAD });
   }, 0);
 }
 
 function stopTypewriterFollow() {
   if (typewriterFollowTimer) clearInterval(typewriterFollowTimer);
   typewriterFollowTimer = null;
+}
+
+function shouldAvoidIme() {
+  const cursor = screen.getCursorScreenPoint();
+  const now = Date.now();
+  const moved = Math.abs(cursor.x - typewriterFollowState.lastX) + Math.abs(cursor.y - typewriterFollowState.lastY);
+  if (moved > 10) {
+    typewriterFollowState.lastX = cursor.x;
+    typewriterFollowState.lastY = cursor.y;
+    typewriterFollowState.stillSince = now;
+    typewriterFollowState.avoidIme = false;
+    return false;
+  }
+  if (!typewriterFollowState.avoidIme && now - typewriterFollowState.stillSince > 900) {
+    typewriterFollowState.avoidIme = true;
+  }
+  return typewriterFollowState.avoidIme;
 }
 
 function positionWindow(window, corner, margin = 18, nearCursor = false) {
@@ -1048,7 +1240,7 @@ function setMainWindowMode(mode) {
   const height = mode === "settings" ? 252 : 108;
   const bounds = getAnchoredBounds(760, height, "bottom-right", 18);
   mainWindow.setMinimumSize(520, mode === "settings" ? 232 : 92);
-  mainWindow.setBounds(bounds, true);
+  mainWindow.setBounds(bounds, false);
 }
 
 function toggleMainWindowCollapse(collapsed) {
@@ -1508,7 +1700,7 @@ redact_window_titles = false
     modelContextWindow: Number(nextConfig.modelContextWindow || 1000000),
     modelAutoCompactTokenLimit: Number(nextConfig.modelAutoCompactTokenLimit || 900000),
     baseUrl: nextConfig.directBaseUrl || "https://fast.allincoding.cc",
-    wireApi: nextConfig.directWireApi || "responses"
+    wireApi: nextConfig.directWireApi || "auto"
   });
   const content = [directBlock, assistantBlock, tunnelBlock, screenBlock, openclawBlock, privacyBlock]
     .map((block) => block.trim())
@@ -1669,7 +1861,7 @@ ipcMain.handle("config:saveDirectModel", (_event, nextConfig) => {
     directModel: String(nextConfig?.directModel || config.directModel || "gpt-5.5"),
     directReviewModel: String(nextConfig?.directReviewModel || config.directReviewModel || "gpt-5.4"),
     directReasoningEffort: String(nextConfig?.directReasoningEffort || config.directReasoningEffort || "xhigh"),
-    directWireApi: String(nextConfig?.directWireApi || config.directWireApi || "responses"),
+    directWireApi: String(nextConfig?.directWireApi || config.directWireApi || "auto"),
     disableResponseStorage: nextConfig?.disableResponseStorage === undefined ? config.disableResponseStorage : Boolean(nextConfig.disableResponseStorage),
     networkAccess: String(nextConfig?.networkAccess || config.networkAccess || "enabled"),
     windowsWslSetupAcknowledged:
