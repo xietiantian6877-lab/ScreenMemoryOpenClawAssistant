@@ -1,0 +1,26 @@
+[assistant]
+observe_interval_seconds = 20
+notify_interval_minutes = 15
+blocked_check_minutes = 6
+memory_dir = "data/memory"
+language = "zh-CN"
+
+[tunnel]
+base_url = ""
+api_key = ""
+memory_endpoint = "/memory/sync"
+timeout_seconds = 12
+
+[screen]
+enable_screenshot = true
+enable_ocr = false
+ocr_max_chars = 1200
+
+[openclaw]
+base_url = ""
+api_key = ""
+timeout_seconds = 12
+
+[privacy]
+store_screenshots = false
+redact_window_titles = false
