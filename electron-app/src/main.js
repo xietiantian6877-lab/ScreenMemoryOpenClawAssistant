@@ -44,6 +44,7 @@ let typewriterWindow = null;
 let cursorBuddyWindow = null;
 let summonWindow = null;
 let cursorBuddyTimer = null;
+let typewriterFollowTimer = null;
 let cursorBuddyHideTimer = null;
 let tray = null;
 let observeTimer = null;
@@ -305,7 +306,7 @@ async function observeWithDirectModel(payload) {
     };
   } catch (error) {
     const fallback = localObserveReadable(payload);
-    fallback.message = `OpenAI 直连暂不可用，已使用本地判断：${error.message}`;
+    fallback.message = `OpenAI 直连暂不可用，已使用本地判断：${formatDirectModelError(error)}`;
     fallback.source = "local";
     return fallback;
   }
@@ -645,6 +646,20 @@ function parseJsonFromModel(text) {
   }
 }
 
+function formatDirectModelError(error) {
+  const message = String(error?.message || error || "");
+  if (message.includes("ECONNRESET")) {
+    return "连接被重置，请检查 base_url、网络代理或服务端是否支持当前模型/参数。";
+  }
+  if (message.includes("401") || message.toLowerCase().includes("unauthorized")) {
+    return "密钥认证失败，请重新保存 OpenAI API key。";
+  }
+  if (message.includes("404")) {
+    return "接口路径或模型不可用，请检查 base_url、wire_api 和 model。";
+  }
+  return `错误：${message}`;
+}
+
 function requestJson(url, options) {
   const target = url instanceof URL ? url : new URL(url);
   const client = target.protocol === "https:" ? https : http;
@@ -703,7 +718,7 @@ async function handleChat(text) {
     try {
       reply = await chatWithDirectModel(text);
     } catch (error) {
-      reply = `OpenAI 直连暂时没有响应，我已记录你的输入。错误：${error.message}`;
+      reply = `OpenAI 直连暂时没有响应，我已记录你的输入。${formatDirectModelError(error)}`;
     }
   } else if (config.tunnelBaseUrl) {
     try {
@@ -721,7 +736,12 @@ async function handleChat(text) {
     updateTray();
     publishState({ syncMessage: message });
   });
-  showTypewriterNearCursor(reply, { autoCloseMs: 18000 });
+  showTypewriterNearCursor(reply, {
+    autoCloseMs: 18000,
+    force: true,
+    persist: false,
+    mode: "cursor"
+  });
   return reply;
 }
 
@@ -743,15 +763,13 @@ function maybeAskBlocked(observation) {
 
 function createChatWindow(prompt) {
   if (chatWindow && !chatWindow.isDestroyed()) {
-    showToast("屏幕记忆助手", prompt);
+    positionNearCursor(chatWindow, 12);
     chatWindow.focus();
     return;
   }
 
-  showToast("屏幕记忆助手", prompt);
   chatWindow = new BrowserWindow({
-    width: 460,
-    height: 118,
+    ...getCursorBuddyBounds(380, 106),
     frame: false,
     transparent: true,
     show: false,
@@ -768,7 +786,7 @@ function createChatWindow(prompt) {
   });
   chatWindow.loadFile(path.join(__dirname, "chat", "chat.html"));
   chatWindow.once("ready-to-show", () => {
-    positionWindow(chatWindow, "bottom-right", 18, true);
+    positionNearCursor(chatWindow, 12);
     chatWindow.show();
   });
   chatWindow.on("closed", () => {
@@ -822,16 +840,20 @@ function showToast(title, message) {
 function showTypewriterNearCursor(message, options = {}) {
   const text = String(message || "").trim();
   if (!text) return;
-  const mode = options.mode || config.buddyDefaultMode || "cursor";
+  const configuredMode = normalizeBuddyMode(config.buddyDefaultMode);
+  const mode = options.mode || (configuredMode === "off" && options.force ? "cursor" : configuredMode);
+  if (mode === "off" && !options.force) return;
   const autoCloseMs = Math.max(2600, options.autoCloseMs || 14000);
+  const persist = options.persist ?? (mode !== "off" && !options.force);
   if (mode !== "off") {
-    showCursorBuddy(options.mood || "speaking", autoCloseMs, mode);
+    showCursorBuddy(options.mood || "speaking", persist ? 24 * 60 * 60 * 1000 : autoCloseMs, mode);
   }
   if (typewriterWindow && !typewriterWindow.isDestroyed()) {
     typewriterWindow.close();
   }
+  stopTypewriterFollow();
 
-  const bounds = mode === "corner" ? getCornerBuddyBounds(380, 156) : getCursorBuddyBounds(380, 156);
+  const bounds = mode === "corner" ? getCornerBuddyBounds(300, 112) : getCursorBuddyBounds(300, 112);
   typewriterWindow = new BrowserWindow({
     ...bounds,
     frame: false,
@@ -853,11 +875,12 @@ function showTypewriterNearCursor(message, options = {}) {
 
   const query = new URLSearchParams({
     text,
-    autoCloseMs: String(options.autoCloseMs || 14000)
+    autoCloseMs: String(persist ? 0 : options.autoCloseMs || 14000)
   });
   typewriterWindow.loadFile(path.join(__dirname, "typewriter", "typewriter.html"), { query: Object.fromEntries(query) });
   typewriterWindow.once("ready-to-show", () => {
     if (typewriterWindow && !typewriterWindow.isDestroyed()) {
+      if (mode === "cursor") startTypewriterFollow();
       try {
         typewriterWindow.showInactive();
       } catch {
@@ -866,6 +889,7 @@ function showTypewriterNearCursor(message, options = {}) {
     }
   });
   typewriterWindow.on("closed", () => {
+    stopTypewriterFollow();
     typewriterWindow = null;
   });
 }
@@ -898,6 +922,34 @@ function getCornerBuddyBounds(preferredWidth, preferredHeight) {
     width,
     height
   };
+}
+
+function positionNearCursor(window, margin = 12) {
+  if (!window || window.isDestroyed()) return;
+  const current = window.getBounds();
+  const bounds = getCursorBuddyBounds(current.width, current.height);
+  window.setBounds({
+    x: bounds.x,
+    y: bounds.y,
+    width: current.width,
+    height: current.height
+  });
+}
+
+function startTypewriterFollow() {
+  stopTypewriterFollow();
+  typewriterFollowTimer = setInterval(() => {
+    if (!typewriterWindow || typewriterWindow.isDestroyed()) {
+      stopTypewriterFollow();
+      return;
+    }
+    positionNearCursor(typewriterWindow, 12);
+  }, 0);
+}
+
+function stopTypewriterFollow() {
+  if (typewriterFollowTimer) clearInterval(typewriterFollowTimer);
+  typewriterFollowTimer = null;
 }
 
 function positionWindow(window, corner, margin = 18, nearCursor = false) {
@@ -968,9 +1020,12 @@ function showMainWindow() {
 
 function registerShortcuts() {
   globalShortcut.unregisterAll();
-  globalShortcut.register("Alt+`", () => {
+  const ok = globalShortcut.register("Alt+`", () => {
     showSummonButtonsNearCursor();
   });
+  if (!ok) {
+    console.warn("Alt+` shortcut registration failed.");
+  }
 }
 
 function showSummonButtonsNearCursor() {
@@ -1025,7 +1080,7 @@ function requestTypingNearCursor() {
 function requestGuidanceNearCursor() {
   closeSummonWindow();
   const hint = buildImmediateGuidance();
-  showTypewriterNearCursor(hint, { autoCloseMs: 16000, mood: "speaking" });
+  showTypewriterNearCursor(hint, { autoCloseMs: 16000, mood: "speaking", force: true, persist: false });
 }
 
 function buildImmediateGuidance() {
@@ -1040,8 +1095,8 @@ function buildImmediateGuidance() {
 function createCursorBuddy() {
   if (cursorBuddyWindow && !cursorBuddyWindow.isDestroyed()) return;
   cursorBuddyWindow = new BrowserWindow({
-    width: 70,
-    height: 70,
+    width: 52,
+    height: 52,
     frame: false,
     transparent: true,
     show: false,
@@ -1060,7 +1115,6 @@ function createCursorBuddy() {
   cursorBuddyWindow.setIgnoreMouseEvents(true, { forward: true });
   cursorBuddyWindow.loadFile(path.join(__dirname, "cursor-buddy", "cursor-buddy.html"));
   cursorBuddyWindow.once("ready-to-show", () => {
-    moveCursorBuddy();
     startCursorBuddy();
   });
   cursorBuddyWindow.on("closed", () => {
@@ -1105,12 +1159,13 @@ function hideCursorBuddy() {
 
 function startCursorBuddy() {
   stopCursorBuddy();
-  cursorBuddyTimer = setInterval(() => moveCursorBuddy(config.buddyDefaultMode || "cursor"), 120);
+  cursorBuddyTimer = setInterval(() => moveCursorBuddy(config.buddyDefaultMode || "cursor"), 0);
 }
 
 function stopCursorBuddy() {
   if (cursorBuddyTimer) clearInterval(cursorBuddyTimer);
   cursorBuddyTimer = null;
+  stopTypewriterFollow();
   if (cursorBuddyHideTimer) clearTimeout(cursorBuddyHideTimer);
   cursorBuddyHideTimer = null;
 }
@@ -1118,18 +1173,18 @@ function stopCursorBuddy() {
 function moveCursorBuddy(mode = "cursor") {
   if (!cursorBuddyWindow || cursorBuddyWindow.isDestroyed()) return;
   if (mode === "corner") {
-    const bounds = getCornerBuddyBounds(70, 70);
-    cursorBuddyWindow.setBounds({ x: bounds.x, y: bounds.y + 82, width: 70, height: 70 });
+    const bounds = getCornerBuddyBounds(52, 52);
+    cursorBuddyWindow.setBounds({ x: bounds.x, y: bounds.y + 70, width: 52, height: 52 });
     return;
   }
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
   const area = display.workArea;
-  const size = 70;
-  let x = cursor.x + 18;
-  let y = cursor.y + 18;
-  if (x + size > area.x + area.width - 8) x = cursor.x - size - 18;
-  if (y + size > area.y + area.height - 8) y = cursor.y - size - 18;
+  const size = 52;
+  let x = cursor.x + 12;
+  let y = cursor.y + 12;
+  if (x + size > area.x + area.width - 8) x = cursor.x - size - 12;
+  if (y + size > area.y + area.height - 8) y = cursor.y - size - 12;
   cursorBuddyWindow.setBounds({
     x: Math.max(area.x + 8, Math.min(x, area.x + area.width - size - 8)),
     y: Math.max(area.y + 8, Math.min(y, area.y + area.height - size - 8)),
@@ -1499,7 +1554,12 @@ ipcMain.handle("config:saveDirectModel", (_event, nextConfig) => {
   return next;
 });
 ipcMain.handle("config:saveBuddyMode", (_event, mode) => {
-  const next = saveConfig({ buddyDefaultMode: normalizeBuddyMode(mode) });
+  const buddyDefaultMode = normalizeBuddyMode(mode);
+  const next = saveConfig({ buddyDefaultMode });
+  if (buddyDefaultMode === "off") {
+    hideCursorBuddy();
+    if (typewriterWindow && !typewriterWindow.isDestroyed()) typewriterWindow.close();
+  }
   publishState({ config: next });
   return next;
 });

@@ -18,8 +18,8 @@ body {
 
 .cursor {
   position: relative;
-  width: 70px;
-  height: 70px;
+  width: 52px;
+  height: 52px;
   opacity: 1;
   animation: arrive 180ms ease-out;
 }
@@ -30,26 +30,26 @@ body {
   top: 4px;
   width: 0;
   height: 0;
-  border-top: 28px solid #2f7df6;
-  border-right: 18px solid transparent;
-  filter: drop-shadow(0 6px 10px rgba(47, 125, 246, 0.28));
+  border-top: 22px solid #2f7df6;
+  border-right: 14px solid transparent;
+  filter: drop-shadow(0 2px 3px rgba(47, 125, 246, 0.12));
   transform: rotate(-18deg);
 }
 
 .face {
   position: absolute;
-  left: 22px;
-  top: 20px;
-  width: 43px;
-  height: 43px;
+  left: 17px;
+  top: 15px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   color: #1f2a37;
   background: rgba(255, 255, 255, 0.98);
   border: 1px solid #dfe4ec;
-  border-radius: 12px;
-  box-shadow: 0 10px 24px rgba(18, 24, 38, 0.2);
-  font-size: 13px;
+  border-radius: 9px;
+  box-shadow: 0 1px 4px rgba(18, 24, 38, 0.08);
+  font-size: 10px;
   font-weight: 700;
 }
 

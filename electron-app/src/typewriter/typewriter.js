@@ -13,7 +13,9 @@ function tick() {
 }
 
 tick();
-window.setTimeout(() => {
-  document.body.classList.add("leaving");
-  window.setTimeout(() => window.close(), 180);
-}, Math.max(2400, autoCloseMs));
+if (autoCloseMs > 0) {
+  window.setTimeout(() => {
+    document.body.classList.add("leaving");
+    window.setTimeout(() => window.close(), 180);
+  }, Math.max(2400, autoCloseMs));
+}
