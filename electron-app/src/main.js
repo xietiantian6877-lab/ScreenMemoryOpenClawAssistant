@@ -642,12 +642,14 @@ async function callOpenAIAuto(body) {
 async function callOpenAIResponsesOnly(body) {
   const url = buildOpenAIUrl("/responses");
   const effort = normalizeReasoningEffort(config.directReasoningEffort);
+  const normalized = splitResponsesInput(body.input);
   const payload = {
     model: body.model || config.directModel,
-    input: body.input,
+    input: normalized.input,
     reasoning: { effort },
     store: !config.disableResponseStorage
   };
+  if (normalized.instructions) payload.instructions = normalized.instructions;
   const requestOptions = {
     method: "POST",
     headers: {
@@ -663,8 +665,9 @@ async function callOpenAIResponsesOnly(body) {
     if (isInvalidArgumentError(error)) {
       const compatPayload = {
         model: payload.model,
-        input: textOnlyResponsesInput(body.input)
+        input: textOnlyResponsesInput(normalized.input)
       };
+      if (normalized.instructions) compatPayload.instructions = normalized.instructions;
       return requestJsonWithRetry(url, { ...requestOptions, body: JSON.stringify(compatPayload) });
     }
     if (effort !== "xhigh") throw error;
@@ -672,6 +675,20 @@ async function callOpenAIResponsesOnly(body) {
     const fallbackPayload = { ...payload, reasoning: { effort: "high" } };
     return requestJsonWithRetry(url, { ...requestOptions, body: JSON.stringify(fallbackPayload) });
   }
+}
+
+function splitResponsesInput(input) {
+  const messages = Array.isArray(input) ? input : [{ role: "user", content: [{ type: "input_text", text: String(input || "") }] }];
+  const instructions = messages
+    .filter((message) => message.role === "system")
+    .flatMap((message) => Array.isArray(message.content) ? message.content : [{ type: "input_text", text: String(message.content || "") }])
+    .map((part) => String(part.text || part.value || ""))
+    .filter(Boolean)
+    .join("\n");
+  return {
+    instructions,
+    input: messages.filter((message) => message.role !== "system")
+  };
 }
 
 async function callOpenAIChatCompletions(body, options = {}) {
@@ -873,7 +890,8 @@ function requestJsonWithElectronNet(url, options) {
   const target = url instanceof URL ? url.toString() : String(url);
   const body = options.body || "";
   const headers = { ...(options.headers || {}) };
-  if (body && !headers["Content-Length"]) headers["Content-Length"] = String(Buffer.byteLength(body));
+  delete headers["Content-Length"];
+  delete headers["content-length"];
 
   return new Promise((resolve, reject) => {
     const request = net.request({
