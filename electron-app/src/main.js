@@ -1177,10 +1177,7 @@ function resizeTypewriterWindow(bounds = {}) {
   if (!typewriterWindow || typewriterWindow.isDestroyed()) return false;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const area = display.workArea;
-  const width = Math.max(
-    TYPEWRITER_WIDTH + TYPEWRITER_POINTER_PAD,
-    Math.min(Number(bounds.width || TYPEWRITER_WIDTH), Math.min(TYPEWRITER_MAX_WIDTH, area.width - 24))
-  );
+  const width = typewriterWindow.getBounds().width;
   const height = Math.max(
     84,
     Math.min(Number(bounds.height || TYPEWRITER_HEIGHT), Math.floor(area.height * TYPEWRITER_MAX_HEIGHT_RATIO))

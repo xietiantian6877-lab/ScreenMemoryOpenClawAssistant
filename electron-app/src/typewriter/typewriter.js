@@ -9,14 +9,12 @@ let lastWidth = 0;
 let lastHeight = 0;
 
 function requestResize() {
-  const textLength = Math.max(1, textEl.textContent.length);
-  const desiredWidth = Math.min(540, Math.max(318, Math.ceil(textLength * 6.6) + 70));
-  buddyEl.style.width = `${desiredWidth - 32}px`;
+  const desiredWidth = 318;
   const desiredHeight = Math.min(
     Math.max(84, Math.ceil(buddyEl.scrollHeight) + 18),
     Math.max(120, Math.floor(window.screen.availHeight * 0.58))
   );
-  if (Math.abs(desiredWidth - lastWidth) < 8 && Math.abs(desiredHeight - lastHeight) < 6) return;
+  if (Math.abs(desiredHeight - lastHeight) < 6 && desiredWidth === lastWidth) return;
   lastWidth = desiredWidth;
   lastHeight = desiredHeight;
   ipcRenderer.invoke("buddy:typewriterResize", { width: desiredWidth, height: desiredHeight }).catch(() => {});
