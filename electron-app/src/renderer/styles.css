@@ -118,7 +118,7 @@ button {
 .status-row {
   gap: 8px;
   min-width: 0;
-  margin-bottom: 6px;
+  margin-top: 6px;
   -webkit-app-region: no-drag;
 }
 
@@ -365,12 +365,25 @@ input::placeholder {
 }
 
 .settings-title {
-  height: 30px;
+  min-height: 30px;
   justify-content: flex-start;
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.title-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  color: #8c929c;
+  font-size: 12px;
+  font-weight: 400;
+  -webkit-app-region: no-drag;
 }
 
 .settings-tabs {
@@ -487,10 +500,21 @@ input::placeholder {
 .codex-row {
   color: #6f7680;
   font-size: 12px;
+  align-items: flex-start;
 }
 
 .codex-row select {
   width: auto;
+}
+
+#codexStatusText {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: #6f7680;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .buddy-mode,

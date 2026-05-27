@@ -242,7 +242,8 @@ function renderMode(config = {}) {
   const selectedModel = mode === "codex" ? (config.codexModel || config.directModel || "gpt-5.5") : (config.directModel || "gpt-5.5");
   homeModelSelect.value = availableModels.includes(selectedModel) ? selectedModel : "";
   homeReasoningSelect.value = mode === "codex" ? (config.codexReasoningEffort || "xhigh") : (config.directReasoningEffort || "xhigh");
-  codexStatusText.textContent = config.codexStatus?.message || "Codex 未检测";
+  codexStatusText.textContent = compactStatus(config.codexStatus?.message || "Codex 未检测");
+  codexStatusText.title = config.codexStatus?.message || "Codex 未检测";
   codexSearchToggle.checked = config.codexSearch !== false;
 }
 
@@ -332,6 +333,7 @@ function setSettingsTab(name) {
   Object.entries(settingsPanes).forEach(([key, pane]) => {
     pane.classList.toggle("active", key === tabName);
   });
+  requestSettingsResize();
 }
 
 function getModelGroupName(model) {
@@ -339,6 +341,19 @@ function getModelGroupName(model) {
   if (!value) return "未选模型";
   const match = value.match(/^([a-z]+-[0-9.]+)/i);
   return match ? match[1] : value;
+}
+
+function compactStatus(text) {
+  const value = String(text || "").replace(/\s+/g, " ").trim();
+  return value.length > 54 ? `${value.slice(0, 54)}...` : value;
+}
+
+function requestSettingsResize() {
+  if (!appShell.classList.contains("settings-open") || !window.screenMemory.resizeSettings) return;
+  requestAnimationFrame(() => {
+    const desiredHeight = Math.ceil(document.getElementById("settingsView").scrollHeight + 24);
+    window.screenMemory.resizeSettings(desiredHeight);
+  });
 }
 
 function renderChatFrequencyText(value) {
@@ -367,6 +382,7 @@ async function setSettingsOpen(open) {
   if (window.screenMemory.setWindowMode) {
     await window.screenMemory.setWindowMode(open ? "settings" : "composer");
   }
+  if (open) requestSettingsResize();
   if (open) directApiKeyInput.focus();
   else composerInput.focus();
 }

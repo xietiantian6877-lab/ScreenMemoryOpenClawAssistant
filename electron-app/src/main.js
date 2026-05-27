@@ -1069,8 +1069,8 @@ async function refreshCodexStatus() {
   try {
     const version = (await runProcess(command, ["--version"], { timeoutMs: 10000 })).stdout.trim();
     const login = await runProcess(command, ["login", "status"], { timeoutMs: 10000 });
-    const doctor = await runProcess(command, ["doctor", "--json"], { timeoutMs: 20000, maxBuffer: 400000 });
-    const parsed = JSON.parse(doctor.stdout || "{}");
+    const doctor = await runProcess(command, ["doctor", "--json"], { timeoutMs: 30000, maxBuffer: 800000 });
+    const parsed = parseJsonObjectFromText(doctor.stdout || doctor.stderr || "{}");
     const configDetails = parsed?.checks?.["config.load"]?.details || {};
     const reachability = parsed?.checks?.["network.provider_reachability"]?.status;
     const auth = parsed?.checks?.["auth.credentials"]?.status;
@@ -1093,11 +1093,35 @@ async function refreshCodexStatus() {
       command,
       version: "",
       model: config.codexModel || config.directModel || "",
-      message: `Codex 检测失败：${error.message}`
+      message: `Codex 检测失败：${formatShortStatus(error.message)}`
     };
   }
   publishState({ config: publicConfig() });
   return codexStatus;
+}
+
+function parseJsonObjectFromText(text) {
+  const source = String(text || "").trim();
+  if (!source) return {};
+  try {
+    return JSON.parse(source);
+  } catch {
+    const start = source.indexOf("{");
+    const end = source.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(source.slice(start, end + 1));
+    }
+    throw new Error(source.slice(0, 240) || "Codex JSON 为空");
+  }
+}
+
+function formatShortStatus(message) {
+  const text = String(message || "").replace(/\s+/g, " ").trim();
+  if (!text) return "未知错误";
+  if (text.includes("not running")) return "后台服务未运行";
+  if (text.includes("auth")) return "登录状态异常";
+  if (text.includes("timed out") || text.includes("请求超时")) return "检测超时";
+  return text.length > 80 ? `${text.slice(0, 80)}...` : text;
 }
 
 function requestJson(url, options) {
@@ -1682,6 +1706,14 @@ function setMainWindowMode(mode) {
   const height = mode === "settings" ? 318 : 132;
   const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
   mainWindow.setMinimumSize(520, mode === "settings" ? 298 : 112);
+  mainWindow.setBounds(bounds, false);
+}
+
+function resizeSettingsWindow(height) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const safeHeight = Math.max(238, Math.min(420, Number(height || 318)));
+  const bounds = getAnchoredBounds(820, safeHeight, "bottom-right", 18);
+  mainWindow.setMinimumSize(520, Math.max(218, safeHeight - 20));
   mainWindow.setBounds(bounds, false);
 }
 
@@ -2510,6 +2542,7 @@ ipcMain.handle("window:minimize", () => mainWindow?.hide());
 ipcMain.handle("window:hide", () => mainWindow?.hide());
 ipcMain.handle("window:close", () => mainWindow?.hide());
 ipcMain.handle("window:setMode", (_event, mode) => setMainWindowMode(mode));
+ipcMain.handle("window:resizeSettings", (_event, height) => resizeSettingsWindow(height));
 ipcMain.handle("window:toggleCollapse", (_event, collapsed) => toggleMainWindowCollapse(collapsed));
 ipcMain.handle("memory:openFolder", () => shell.openPath(MEMORY_DIR));
 ipcMain.handle("debug:testBlockedPopup", () => createChatWindow("我猜你可能不确定下一步怎么操作，要不要我根据当前窗口帮你拆一下？"));

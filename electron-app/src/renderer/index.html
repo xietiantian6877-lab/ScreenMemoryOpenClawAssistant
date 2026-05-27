@@ -10,6 +10,10 @@
     <main class="app-shell" id="appShell">
       <section class="composer-view">
         <div class="path-line" id="windowText">识别屏幕：等待识别</div>
+        <div class="input-row">
+          <input id="composerInput" placeholder="我有什么可以帮你" autocomplete="off" />
+          <button id="sendBtn" class="send" title="发送">↑</button>
+        </div>
         <div class="status-row">
           <button id="permissionBtn" class="permission-btn codex-muted" type="button" title="Codex 权限">完全访问权限</button>
           <div class="home-model-bar">
@@ -26,10 +30,6 @@
           </div>
           <button id="settingsBtn" class="plain" title="设置">...</button>
         </div>
-        <div class="input-row">
-          <input id="composerInput" placeholder="我有什么可以帮你" autocomplete="off" />
-          <button id="sendBtn" class="send" title="发送">↑</button>
-        </div>
         <div class="tiny-line">
           <span id="connectionText">本地判断</span>
           <span id="syncText">未同步</span>
@@ -41,14 +41,7 @@
         <div class="settings-title">
           <button id="settingsBackBtn" class="back-btn" title="返回">‹</button>
           <span>设置</span>
-        </div>
-        <nav class="settings-tabs" aria-label="设置分类">
-          <button id="settingsTabMemory" class="settings-tab active" type="button" data-tab="memory">记忆</button>
-          <button id="settingsTabModel" class="settings-tab" type="button" data-tab="model">模型</button>
-          <button id="settingsTabTunnel" class="settings-tab" type="button" data-tab="tunnel">隧穿</button>
-        </nav>
-        <div class="settings-pane active" id="memoryPane">
-          <div class="settings-row secondary-row controls-row">
+          <div class="title-controls">
             <label class="chat-frequency">
               <span>聊天频率</span>
               <input id="chatFrequencyInput" type="range" min="0" max="100" step="5" />
@@ -67,6 +60,13 @@
               </select>
             </label>
           </div>
+        </div>
+        <nav class="settings-tabs" aria-label="设置分类">
+          <button id="settingsTabMemory" class="settings-tab active" type="button" data-tab="memory">记忆</button>
+          <button id="settingsTabModel" class="settings-tab" type="button" data-tab="model">模型</button>
+          <button id="settingsTabTunnel" class="settings-tab" type="button" data-tab="tunnel">隧穿</button>
+        </nav>
+        <div class="settings-pane active" id="memoryPane">
           <div class="settings-row memory-row">
             <button id="packageTodayBtn" class="secondary">今日包</button>
             <button id="openMemoryBtnSettings" class="secondary">打开记忆</button>
