@@ -2,6 +2,9 @@
   font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
   color: #1f2329;
   background: transparent;
+  --settings-font-size: 13px;
+  --settings-control-font-size: 13px;
+  --settings-note-font-size: 13px;
 }
 
 * {
@@ -371,10 +374,18 @@ input::placeholder {
   min-height: 30px;
   justify-content: flex-start;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--settings-font-size);
   font-weight: 600;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.settings-view,
+.settings-view input,
+.settings-view select,
+.settings-view button,
+.settings-view output {
+  font-size: var(--settings-control-font-size);
 }
 
 .title-controls {
@@ -384,7 +395,7 @@ input::placeholder {
   min-width: 0;
   flex: 1 1 auto;
   color: #8c929c;
-  font-size: 12px;
+  font-size: var(--settings-font-size);
   font-weight: 400;
   -webkit-app-region: no-drag;
 }
@@ -402,7 +413,7 @@ input::placeholder {
   color: #5c6570;
   background: #f1f1f2;
   border-radius: 9px;
-  font-size: 12px;
+  font-size: var(--settings-control-font-size);
 }
 
 .settings-tab.active {
@@ -425,7 +436,7 @@ input::placeholder {
   color: #8a9099;
   background: transparent;
   border-radius: 6px;
-  font-size: 16px;
+  font-size: var(--settings-control-font-size);
   line-height: 1;
   flex: 0 0 auto;
 }
@@ -466,6 +477,7 @@ input::placeholder {
   color: #fff;
   background: #2f7df6;
   border-radius: 10px;
+  font-size: var(--settings-control-font-size);
   white-space: nowrap;
 }
 
@@ -477,7 +489,7 @@ input::placeholder {
 
 .secondary-row {
   color: #8c929c;
-  font-size: 12px;
+  font-size: var(--settings-note-font-size);
 }
 
 .controls-row,
@@ -502,7 +514,7 @@ input::placeholder {
 
 .codex-row {
   color: #6f7680;
-  font-size: 12px;
+  font-size: var(--settings-note-font-size);
   align-items: center;
 }
 
@@ -545,6 +557,12 @@ input::placeholder {
 .chat-frequency output {
   min-width: 48px;
   color: #5d6470;
+  font-size: var(--settings-control-font-size);
+}
+
+#settingsStatus,
+#codexStatusText {
+  font-size: var(--settings-note-font-size);
 }
 
 .guide-toggle input[type="checkbox"] {

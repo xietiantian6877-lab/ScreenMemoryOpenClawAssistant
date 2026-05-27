@@ -26,9 +26,9 @@ button {
 }
 
 .bubble {
-  width: calc(100vw - 12px);
+  width: calc(100vw - 18px);
   height: calc(100vh - 12px);
-  margin: 6px;
+  margin: 6px 12px 6px 6px;
   display: flex;
   justify-content: flex-start;
   overflow: hidden;

@@ -1526,7 +1526,7 @@ function resizeChatWindow(bounds = {}) {
   if (!chatWindow || chatWindow.isDestroyed()) return false;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const area = display.workArea;
-  const width = Math.max(260, Math.min(Number(bounds.width || 360), Math.min(560, area.width - 24)));
+  const width = Math.max(260, Math.min(Number(bounds.width || 360), area.width - 24));
   const height = Math.max(58, Math.min(Number(bounds.height || 66), Math.min(150, area.height - 24)));
   const current = chatWindow.getBounds();
   const nextWidth = Math.round(width);

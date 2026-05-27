@@ -55,10 +55,9 @@ function resizeToContent() {
 function scheduleWindowResize() {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    const inputWidth = parseFloat(chatInput.style.getPropertyValue("--input-width")) || minInputWidth;
-    const inputHeight = parseFloat(chatInput.style.getPropertyValue("--input-height")) || minInputHeight;
-    const desiredWidth = Math.ceil(inputWidth + 6 + 34 + 6 + 34 + 8 + 46 + 12);
-    const desiredHeight = Math.ceil(Math.max(inputHeight + 12, 46) + 12);
+    const dialog = document.querySelector(".dialog");
+    const desiredWidth = Math.ceil(dialog.scrollWidth + 28);
+    const desiredHeight = Math.ceil(Math.max(dialog.scrollHeight, 46) + 18);
     window.screenMemory?.resizeChat?.({ width: desiredWidth, height: desiredHeight });
   }, 20);
 }
