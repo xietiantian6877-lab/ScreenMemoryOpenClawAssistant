@@ -58,6 +58,8 @@ let mainWindow = null;
 let chatWindow = null;
 let toastWindow = null;
 let typewriterWindow = null;
+let dropdownWindow = null;
+let dropdownToken = 0;
 let cursorBuddyWindow = null;
 let summonWindow = null;
 let cursorBuddyTimer = null;
@@ -1508,6 +1510,7 @@ function maybeAskBlocked(observation) {
 
 function maybeCasualChat(observation) {
   if (!config.casualChat) return;
+  if (normalizeBuddyMode(config.buddyDefaultMode) === "off") return;
   const now = Date.now();
   const frequency = normalizeFrequency(config.casualChatFrequency);
   if (frequency <= 0) return;
@@ -1521,7 +1524,7 @@ function maybeCasualChat(observation) {
     lastCasualChatText = message;
     showTypewriterNearCursor(message, {
       autoCloseMs: 9000,
-      force: true,
+      force: false,
       persist: false,
       showBuddy: false
     });
@@ -1651,6 +1654,76 @@ function resizeChatWindow(bounds = {}) {
   const nextX = Math.max(area.x + 10, Math.min(current.x, area.x + area.width - nextWidth - 10));
   const nextY = Math.max(area.y + 10, Math.min(current.y, area.y + area.height - nextHeight - 10));
   chatWindow.setBounds({ x: nextX, y: nextY, width: nextWidth, height: nextHeight }, false);
+  return true;
+}
+
+function showDropdownWindow(payload = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const token = ++dropdownToken;
+  const previousWindow = dropdownWindow;
+  dropdownWindow = null;
+  if (previousWindow && !previousWindow.isDestroyed()) {
+    previousWindow.removeAllListeners("closed");
+    previousWindow.close();
+  }
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  if (!items.length) return false;
+  const type = String(payload.type || "model");
+  const selected = String(payload.selected || "");
+  const buttonRect = payload.rect || {};
+  const mainBounds = mainWindow.getBounds();
+  const display = screen.getDisplayNearestPoint({ x: mainBounds.x + Number(buttonRect.left || 0), y: mainBounds.y + Number(buttonRect.top || 0) });
+  const area = display.workArea;
+  const itemHeight = 32;
+  const framePad = 8;
+  const width = Math.max(92, Math.min(240, Number(payload.width || 168)));
+  const naturalHeight = Math.max(44, items.length * itemHeight + 12);
+  const contentHeight = Math.min(Math.max(44, area.height - 24 - framePad * 2), naturalHeight);
+  const windowWidth = width + framePad * 2;
+  const windowHeight = contentHeight + framePad * 2;
+  let x = Math.round(mainBounds.x + Number(buttonRect.right || 0) - windowWidth + framePad);
+  let y = Math.round(mainBounds.y + Number(buttonRect.top || 0) - windowHeight);
+  if (x < area.x + 8) x = area.x + 8;
+  if (x + windowWidth > area.x + area.width - 8) x = area.x + area.width - windowWidth - 8;
+  if (y < area.y + 8) y = Math.round(mainBounds.y + Number(buttonRect.bottom || 0));
+  if (y + windowHeight > area.y + area.height - 8) y = area.y + area.height - windowHeight - 8;
+
+  dropdownWindow = new BrowserWindow({
+    x,
+    y,
+    width: windowWidth,
+    height: windowHeight,
+    frame: false,
+    transparent: true,
+    show: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    backgroundColor: "#00000000",
+    parent: mainWindow,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      additionalArguments: [`--dropdown=${encodeURIComponent(JSON.stringify({ type, selected, items, width, height: contentHeight, pad: framePad }))}`]
+    }
+  });
+  dropdownWindow.loadFile(path.join(__dirname, "dropdown", "dropdown.html"));
+  dropdownWindow.once("ready-to-show", () => {
+    if (!dropdownWindow || dropdownWindow.isDestroyed()) return;
+    dropdownWindow.showInactive();
+  });
+  dropdownWindow.on("closed", () => {
+    if (token !== dropdownToken) return;
+    dropdownWindow = null;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("dropdown:closed");
+  });
+  return true;
+}
+
+function closeDropdownWindow() {
+  if (dropdownWindow && !dropdownWindow.isDestroyed()) dropdownWindow.close();
   return true;
 }
 
@@ -1943,9 +2016,9 @@ function setMainWindowMenuOpen(open) {
   if (mainWindow.getBounds().width <= 120) return;
   if (mainMenuOpen === Boolean(open)) return;
   mainMenuOpen = Boolean(open);
-  const height = open ? 292 : 132;
+  const height = open ? 214 : 132;
   const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
-  mainWindow.setMinimumSize(520, open ? 260 : 112);
+  mainWindow.setMinimumSize(520, open ? 190 : 112);
   mainWindow.setBounds(bounds, false);
   keepMainWindowOnTop();
 }
@@ -2768,6 +2841,7 @@ ipcMain.handle("config:saveBuddyMode", (_event, mode) => {
     hideCursorBuddy();
     if (typewriterWindow && !typewriterWindow.isDestroyed()) typewriterWindow.close();
   }
+  if (buddyDefaultMode === "off") lastCasualChatAt = Date.now();
   publishState({ config: next });
   return next;
 });
@@ -2799,6 +2873,15 @@ ipcMain.handle("chat:close", () => {
   if (chatWindow && !chatWindow.isDestroyed()) chatWindow.close();
 });
 ipcMain.handle("chat:resize", (_event, bounds) => resizeChatWindow(bounds));
+ipcMain.handle("dropdown:show", (_event, payload) => showDropdownWindow(payload));
+ipcMain.handle("dropdown:close", () => closeDropdownWindow());
+ipcMain.handle("dropdown:select", (_event, payload) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("dropdown:select", payload);
+  }
+  closeDropdownWindow();
+  return true;
+});
 ipcMain.handle("buddy:typewriter", (_event, text) => showTypewriterNearCursor(String(text || ""), { autoCloseMs: 12000 }));
 ipcMain.handle("buddy:typewriterResize", (_event, bounds) => resizeTypewriterWindow(bounds));
 ipcMain.handle("buddy:summonMenu", () => showSummonButtonsNearCursor());

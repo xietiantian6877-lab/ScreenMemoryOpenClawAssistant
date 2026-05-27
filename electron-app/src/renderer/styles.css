@@ -144,6 +144,7 @@ button {
   font-weight: 600;
   position: relative;
   white-space: nowrap;
+  transition: color 140ms linear, background-color 140ms linear, transform 140ms linear;
 }
 
 .permission-btn::before {
@@ -176,6 +177,24 @@ button {
   background: #b8bec7;
 }
 
+.permission-btn:hover,
+.model-chip:hover,
+.model-select-btn:hover,
+.plain:hover,
+.icon:hover {
+  background: #eceef2;
+}
+
+.permission-btn:active,
+.model-chip:active,
+.model-select-btn:active,
+.plain:active,
+.icon:active,
+.send:active:not(:disabled),
+.pet-card:active {
+  transform: scale(0.985);
+}
+
 .home-model-bar {
   display: inline-flex;
   align-items: center;
@@ -196,6 +215,7 @@ button {
   border-radius: 9px;
   font-size: 12px;
   -webkit-app-region: no-drag;
+  transition: color 140ms linear, background-color 140ms linear, border-color 140ms linear, transform 140ms linear;
 }
 
 .model-chip.muted,
@@ -247,20 +267,31 @@ button {
   transform: translateY(-52%);
   color: #7a828d;
   font-size: 12px;
+  transition: transform 140ms linear, color 140ms linear;
+}
+
+.home-model-menu-wrap.open .model-select-btn::after {
+  transform: translateY(-52%) rotate(180deg);
 }
 
 .model-menu {
+  display: none;
   position: absolute;
   right: 0;
   bottom: 34px;
   z-index: 30;
   min-width: 168px;
   padding: 6px;
-  display: none;
+  gap: 2px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(6px);
   background: rgba(255, 255, 255, 0.98);
   border: 1px solid rgba(220, 224, 232, 0.96);
   border-radius: 12px;
   box-shadow: 0 12px 34px rgba(20, 25, 35, 0.16);
+  transition: opacity 160ms linear, transform 160ms linear, visibility 160ms linear;
 }
 
 .model-menu.compact {
@@ -268,8 +299,7 @@ button {
 }
 
 .home-model-menu-wrap.open .model-menu {
-  display: grid;
-  gap: 2px;
+  display: none;
 }
 
 .model-menu button {
@@ -282,11 +312,16 @@ button {
   font-size: 12px;
   white-space: nowrap;
   position: relative;
+  transition: color 120ms linear, background-color 120ms linear, transform 120ms linear;
 }
 
 .model-menu button:hover,
 .model-menu button.active {
   background: #f2f4f7;
+}
+
+.model-menu button:active {
+  transform: translateX(1px);
 }
 
 .model-menu button.active::after {
@@ -358,7 +393,7 @@ input::placeholder {
   border-radius: 999px;
   font-size: 18px;
   line-height: 1;
-  transition: background 200ms ease;
+  transition: background-color 140ms linear, opacity 140ms linear, transform 140ms linear;
 }
 
 .send:hover:not(:disabled) {
@@ -403,7 +438,7 @@ input::placeholder {
   padding: 8px;
   perspective: 260px;
   -webkit-app-region: no-drag;
-  transition: transform 300ms ease, padding 300ms ease, background 300ms ease;
+  transition: transform 160ms linear, padding 160ms linear, background-color 160ms linear;
 }
 
 .pet-face {

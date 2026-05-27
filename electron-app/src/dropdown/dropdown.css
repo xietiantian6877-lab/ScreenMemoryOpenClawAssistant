@@ -1,0 +1,94 @@
+:root {
+  font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  color: #20242c;
+  background: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+button {
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+}
+
+.menu {
+  width: calc(100vw - 8px);
+  max-height: calc(100vh - 8px);
+  margin: 4px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(220, 224, 232, 0.96);
+  border-radius: 12px;
+  box-shadow: 0 12px 34px rgba(20, 25, 35, 0.16);
+  animation: menuIn 170ms linear both;
+  transform-origin: bottom right;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(130, 139, 154, 0.42) transparent;
+}
+
+.menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.menu::-webkit-scrollbar-thumb {
+  background: rgba(130, 139, 154, 0.42);
+  border-radius: 999px;
+}
+
+.menu button {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 28px 0 10px;
+  color: #2e3540;
+  background: transparent;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12px;
+  white-space: nowrap;
+  position: relative;
+  transition: background-color 120ms linear, transform 120ms linear;
+}
+
+.menu button:hover,
+.menu button.active {
+  background: #f2f4f7;
+}
+
+.menu button:active {
+  transform: translateX(1px);
+}
+
+.menu button.active::after {
+  content: "✓";
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #2f7df6;
+}
+
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

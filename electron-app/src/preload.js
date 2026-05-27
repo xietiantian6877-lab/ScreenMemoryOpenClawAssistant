@@ -23,6 +23,15 @@ contextBridge.exposeInMainWorld("screenMemory", {
   toggleCollapse: (collapsed) => ipcRenderer.invoke("window:toggleCollapse", collapsed),
   setWindowMode: (mode) => ipcRenderer.invoke("window:setMode", mode),
   setMenuOpen: (open) => ipcRenderer.invoke("window:setMenuOpen", open),
+  showDropdown: (payload) => ipcRenderer.invoke("dropdown:show", payload),
+  closeDropdown: () => ipcRenderer.invoke("dropdown:close"),
+  selectDropdown: (payload) => ipcRenderer.invoke("dropdown:select", payload),
+  onDropdownSelect: (handler) => {
+    ipcRenderer.on("dropdown:select", (_event, payload) => handler(payload));
+  },
+  onDropdownClosed: (handler) => {
+    ipcRenderer.on("dropdown:closed", () => handler());
+  },
   resizeSettings: (height) => ipcRenderer.invoke("window:resizeSettings", height),
   submitChat: (text) => ipcRenderer.invoke("chat:submit", text),
   closeChat: () => ipcRenderer.invoke("chat:close"),
@@ -38,5 +47,14 @@ contextBridge.exposeInMainWorld("screenMemory", {
   getPrompt: () => {
     const arg = process.argv.find((item) => item.startsWith("--prompt="));
     return arg ? decodeURIComponent(arg.slice("--prompt=".length)) : "";
+  },
+  getDropdownPayload: () => {
+    const arg = process.argv.find((item) => item.startsWith("--dropdown="));
+    if (!arg) return {};
+    try {
+      return JSON.parse(decodeURIComponent(arg.slice("--dropdown=".length)));
+    } catch {
+      return {};
+    }
   }
 });

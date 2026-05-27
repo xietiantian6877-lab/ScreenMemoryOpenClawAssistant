@@ -94,13 +94,15 @@ guidanceToggle.addEventListener("change", async () => {
 homeProviderBtn.addEventListener("click", () => saveAssistantMode(currentConfig?.assistantMode === "codex" ? "api" : "codex"));
 homeModelMenuBtn.addEventListener("click", (event) => {
   event.stopPropagation();
-  toggleMenu(homeModelMenuWrap);
+  showDropdown("model", homeModelMenuBtn);
 });
 homeReasoningMenuBtn.addEventListener("click", (event) => {
   event.stopPropagation();
-  toggleMenu(homeReasoningMenuWrap);
+  showDropdown("reasoning", homeReasoningMenuBtn);
 });
 document.addEventListener("click", () => closeAllMenus());
+window.screenMemory.onDropdownSelect(handleDropdownSelect);
+window.screenMemory.onDropdownClosed(() => closeMenuElements());
 permissionBtn.addEventListener("click", async () => {
   const nextMode = currentConfig?.codexAccessMode === "ask" ? "full" : "ask";
   const config = await window.screenMemory.saveCodexSettings({ ...readCodexSettings(), codexAccessMode: nextMode });
@@ -459,18 +461,12 @@ function updateReasoningMenuButton() {
 }
 
 function toggleMenu(menuWrap) {
-  const open = !menuWrap.classList.contains("open");
-  closeMenuElements();
-  menuWrap.classList.toggle("open", open);
-  appShell.classList.toggle("menu-open", open);
-  const button = menuWrap.querySelector(".model-select-btn");
-  if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
-  setMenuWindowOpen(open);
+  showDropdown(menuWrap === homeReasoningMenuWrap ? "reasoning" : "model", menuWrap.querySelector(".model-select-btn"));
 }
 
 function closeAllMenus(resize = true) {
   closeMenuElements();
-  if (resize) setMenuWindowOpen(false);
+  if (resize && window.screenMemory.closeDropdown) window.screenMemory.closeDropdown();
 }
 
 function closeMenuElements() {
@@ -484,9 +480,46 @@ function closeMenuElements() {
 function setMenuWindowOpen(open) {
   if (menuWindowOpen === Boolean(open)) return;
   menuWindowOpen = Boolean(open);
-  if (window.screenMemory.setMenuOpen && !appShell.classList.contains("settings-open") && !appShell.classList.contains("collapsed")) {
-    window.screenMemory.setMenuOpen(Boolean(open));
+}
+
+function showDropdown(type, button) {
+  if (!button || !window.screenMemory.showDropdown) return;
+  const isReasoning = type === "reasoning";
+  const wrap = isReasoning ? homeReasoningMenuWrap : homeModelMenuWrap;
+  closeMenuElements();
+  wrap.classList.add("open");
+  button.setAttribute("aria-expanded", "true");
+  const rect = button.getBoundingClientRect();
+  const items = isReasoning
+    ? reasoningOptions.map((item) => ({ value: item.value, label: item.label }))
+    : getCurrentModelOptions(currentConfig).map((model) => ({ value: model, label: formatModelLabel(model) }));
+  const selected = isReasoning ? homeReasoningSelect.value : homeModelSelect.value;
+  window.screenMemory.showDropdown({
+    type,
+    selected,
+    items,
+    width: isReasoning ? 92 : 168,
+    rect: {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom
+    }
+  });
+}
+
+async function handleDropdownSelect(payload = {}) {
+  if (payload.type === "reasoning") {
+    homeReasoningSelect.value = String(payload.value || "xhigh");
+    updateReasoningMenuButton();
+    closeMenuElements();
+    await saveHomeModel();
+    return;
   }
+  homeModelSelect.value = String(payload.value || "");
+  updateModelMenuButton();
+  closeMenuElements();
+  await saveHomeModel();
 }
 
 function setCodexBusy(busy) {
