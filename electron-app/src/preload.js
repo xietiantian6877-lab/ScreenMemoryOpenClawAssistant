@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("screenMemory", {
   resizeSettings: (height) => ipcRenderer.invoke("window:resizeSettings", height),
   submitChat: (text) => ipcRenderer.invoke("chat:submit", text),
   closeChat: () => ipcRenderer.invoke("chat:close"),
+  resizeChat: (bounds) => ipcRenderer.invoke("chat:resize", bounds),
   showTypewriter: (text) => ipcRenderer.invoke("buddy:typewriter", text),
   resizeTypewriter: (bounds) => ipcRenderer.invoke("buddy:typewriterResize", bounds),
   summonMenu: () => ipcRenderer.invoke("buddy:summonMenu"),

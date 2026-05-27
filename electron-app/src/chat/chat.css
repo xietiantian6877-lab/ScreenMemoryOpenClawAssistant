@@ -17,67 +17,97 @@ body {
 }
 
 button,
-input {
+textarea {
   font: inherit;
 }
 
+button {
+  cursor: pointer;
+}
+
 .bubble {
-  width: calc(100vw - 14px);
-  height: calc(100vh - 14px);
-  margin: 7px;
+  width: calc(100vw - 12px);
+  height: calc(100vh - 12px);
+  margin: 6px;
+  display: flex;
+  justify-content: flex-start;
   overflow: hidden;
   color: #20242c;
-  background: rgba(255, 255, 255, 0.98);
-  border: 1px solid #e2e3e7;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(18, 24, 38, 0.08);
-  animation: operationIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  background: transparent;
+  animation: bubbleIn 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .dialog {
   height: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 50px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: drag;
 }
 
 .dialog-main {
   min-width: 0;
-  padding: 8px;
-}
-
-.top-line {
   display: flex;
+  align-items: center;
   gap: 6px;
-  min-width: 0;
-  -webkit-app-region: drag;
-}
-
-input {
-  width: 100%;
-  height: 34px;
-  min-width: 0;
-  padding: 0 12px;
-  border: 1px solid #d9dce2;
-  border-radius: 10px;
-  outline: none;
+  padding: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #e2e3e7;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(18, 24, 38, 0.11);
+  transform-origin: left center;
+  clip-path: inset(0 0 0 0 round 12px);
+  animation: controlsIn 260ms 80ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   -webkit-app-region: no-drag;
 }
 
-input:focus {
+textarea {
+  width: var(--input-width, 230px);
+  height: var(--input-height, 34px);
+  min-width: 160px;
+  max-width: 440px;
+  max-height: 118px;
+  padding: 7px 11px;
+  resize: none;
+  overflow: hidden;
+  color: #20242c;
+  background: #fff;
+  border: 1px solid #d9dce2;
+  border-radius: 10px;
+  outline: none;
+  line-height: 20px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+  -webkit-app-region: no-drag;
+}
+
+textarea:focus {
   border-color: #9abcf8;
   box-shadow: 0 0 0 3px rgba(76, 144, 245, 0.12);
 }
 
-#closeChatBtn {
-  width: 30px;
+textarea::placeholder {
+  color: #9aa2ad;
+}
+
+#closeChatBtn,
+#submitBtn {
+  width: 34px;
   height: 34px;
   flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   padding: 0;
-  color: #626a75;
-  background: #f1f1f2;
   border: 0;
   border-radius: 10px;
+  line-height: 1;
   -webkit-app-region: no-drag;
+}
+
+#closeChatBtn {
+  color: #626a75;
+  background: #f1f1f2;
+  font-size: 18px;
 }
 
 #closeChatBtn:hover {
@@ -86,22 +116,34 @@ input:focus {
 }
 
 #submitBtn {
-  width: 100%;
-  height: 30px;
-  margin-top: 6px;
   color: #fff;
   background: #2f7df6;
-  border: 0;
-  border-radius: 10px;
-  cursor: pointer;
+  font-size: 17px;
+  transition: background 180ms ease, opacity 180ms ease;
+}
+
+#submitBtn:hover:not(:disabled) {
+  background: #0f5ad1;
+}
+
+#submitBtn:disabled {
+  opacity: 0.62;
+  cursor: wait;
 }
 
 .pet-side {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
-  padding: 6px;
-  background: #f7f7f8;
-  border-left: 1px solid #ececef;
+  padding: 5px;
+  background: rgba(250, 250, 250, 0.98);
+  border: 1px solid #e2e4e8;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(18, 24, 38, 0.09);
+  animation: petSlideRight 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  -webkit-app-region: no-drag;
 }
 
 .pet-face {
@@ -118,14 +160,36 @@ input:focus {
   animation: petFloat 1500ms ease-in-out infinite;
 }
 
-@keyframes operationIn {
+@keyframes bubbleIn {
   from {
     opacity: 0;
-    transform: translate(16px, 18px) scale(0.98);
+    transform: translateX(20px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translate(0, 0) scale(1);
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes controlsIn {
+  from {
+    opacity: 0;
+    clip-path: inset(0 0 0 100% round 12px);
+    transform: translateX(-12px) scaleX(0.76);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0 round 12px);
+    transform: translateX(0) scaleX(1);
+  }
+}
+
+@keyframes petSlideRight {
+  from {
+    transform: translateX(-12px);
+  }
+  to {
+    transform: translateX(0);
   }
 }
 

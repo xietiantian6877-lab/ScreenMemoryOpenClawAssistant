@@ -227,13 +227,13 @@ function renderConfig(config) {
 
 function renderMode(config = {}) {
   const mode = config.assistantMode === "codex" ? "codex" : "api";
-  const codexConnected = Boolean(config.codexStatus?.connected);
+  const codexConnected = isCodexReady(config);
   document.body.classList.toggle("codex-enabled", mode === "codex" && codexConnected);
   document.body.classList.toggle("codex-muted", !(mode === "codex" && codexConnected));
   homeProviderBtn.textContent = mode === "codex" ? "Codex" : "OpenAI";
   homeProviderBtn.classList.toggle("muted", mode !== "codex");
-  homeProviderBtn.disabled = codexBusy || (mode !== "codex" && !codexConnected);
-  homeProviderBtn.title = !codexConnected ? "Codex 未连接，不能切换" : "切换 API/Codex";
+  homeProviderBtn.disabled = codexBusy;
+  homeProviderBtn.title = !codexConnected && mode !== "codex" ? "点击检测并切换 Codex" : "切换 API/Codex";
   permissionBtn.classList.toggle("codex-muted", mode !== "codex" || !codexConnected);
   permissionBtn.textContent = config.codexAccessMode === "ask" ? "每步确认" : "完全访问权限";
   permissionBtn.disabled = codexBusy || mode !== "codex" || !codexConnected;
@@ -258,9 +258,19 @@ function readCodexSettings() {
 
 async function saveAssistantMode(mode) {
   if (codexBusy) return;
-  if (mode === "codex" && !currentConfig?.codexStatus?.connected) return;
+  if (mode === "codex" && !isCodexReady(currentConfig)) {
+    codexStatusText.textContent = "Codex 检测中";
+    const status = await window.screenMemory.refreshCodexStatus();
+    currentConfig = { ...(currentConfig || {}), codexStatus: status };
+    renderConfig(currentConfig);
+    if (!isCodexReady(currentConfig)) return;
+  }
   const config = await window.screenMemory.saveAssistantMode(mode);
   renderConfig(config);
+}
+
+function isCodexReady(config = {}) {
+  return Boolean(config.codexStatus?.connected || config.codexStatus?.available || config.codexStatus?.command);
 }
 
 async function saveHomeModel() {

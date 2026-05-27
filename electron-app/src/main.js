@@ -86,11 +86,15 @@ let codexStatus = {
   connected: false,
   command: "",
   version: "",
+  doctorOk: false,
+  reachabilityOk: false,
   model: "",
   message: "未检测"
 };
 let modelListCache = [];
 let modelListFetchedAt = 0;
+
+app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 
 app.whenReady().then(() => {
   app.setAppUserModelId("ScreenMemory.OpenClawAssistant");
@@ -137,11 +141,15 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   mainWindow.once("ready-to-show", () => {
     mainWindow.setSkipTaskbar(true);
-    mainWindow.setAlwaysOnTop(true, "floating");
+    keepMainWindowOnTop();
     positionWindow(mainWindow, "bottom-right", 18);
     mainWindow.show();
+    keepMainWindowOnTop();
     showToast("屏幕记忆助手已启动", "后台观察和每日记忆写入已开启。");
   });
+  mainWindow.on("show", keepMainWindowOnTop);
+  mainWindow.on("focus", keepMainWindowOnTop);
+  mainWindow.on("blur", keepMainWindowOnTop);
   mainWindow.on("minimize", (event) => {
     event.preventDefault();
     mainWindow.hide();
@@ -611,7 +619,7 @@ function directModelEnabled() {
 }
 
 function codexModeEnabled() {
-  return config.assistantMode === "codex" && codexStatus.connected;
+  return config.assistantMode === "codex" && Boolean(codexStatus.command || codexStatus.available);
 }
 
 async function chatWithDirectModel(text) {
@@ -655,26 +663,33 @@ async function chatWithCodex(text) {
     config.codexModel || config.directModel || "gpt-5.5",
     "-c",
     `model_reasoning_effort="${escapeTomlString(config.codexReasoningEffort || config.directReasoningEffort || "xhigh")}"`,
-    "-o",
+    "-c",
+    `network_access="${config.codexSearch === false ? "disabled" : "enabled"}"`,
+    "--output-last-message",
     outputPath
   ];
-  if (config.codexSearch) args.push("--search");
   if (config.codexAccessMode === "full") {
     args.push("--dangerously-bypass-approvals-and-sandbox");
   } else {
     args.push("-s", "workspace-write", "-a", "on-request");
   }
-  args.push(prompt);
+  args.push("-");
 
   try {
+    appendCodexLog(`run ${new Date().toISOString()} model=${config.codexModel || config.directModel || "gpt-5.5"} mode=${config.codexAccessMode}`);
     const result = await runProcess(codexStatus.command || "codex", args, {
       cwd: PROJECT_ROOT,
       timeoutMs: 180000,
-      maxBuffer: 240000
+      maxBuffer: 240000,
+      input: prompt
     });
     const fileReply = readText(outputPath).trim();
     const reply = fileReply || result.stdout.trim() || result.stderr.trim();
+    appendCodexLog(`ok ${new Date().toISOString()} chars=${reply.length}`);
     return reply || "Codex 已处理，但没有返回可显示的文字。";
+  } catch (error) {
+    appendCodexLog(`error ${new Date().toISOString()} ${error.message}`);
+    throw error;
   } finally {
     try {
       fs.unlinkSync(outputPath);
@@ -977,14 +992,70 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function appendCodexLog(line) {
+  try {
+    const logDir = path.join(DATA_DIR, "logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, "codex-mode.log"), `${line}\n`, "utf8");
+  } catch {
+    // Logging must not block the assistant.
+  }
+}
+
 function runProcess(command, args = [], options = {}) {
+  const timeoutMs = options.timeoutMs || 30000;
+  const maxBuffer = options.maxBuffer || 120000;
+  return new Promise((resolve, reject) => {
+    const hasInput = options.input !== undefined;
+    const child = spawn(command, args, {
+      cwd: options.cwd || PROJECT_ROOT,
+      windowsHide: true,
+      shell: false,
+      stdio: [hasInput ? "pipe" : "ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("请求超时"));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > maxBuffer) stdout = stdout.slice(-maxBuffer);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+      if (stderr.length > maxBuffer) stderr = stderr.slice(-maxBuffer);
+    });
+    if (hasInput) {
+      child.stdin.write(String(options.input || ""), "utf8");
+      child.stdin.end();
+    }
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ stdout, stderr, code });
+      } else {
+        const message = (stderr || stdout || `进程退出码 ${code}`).trim();
+        reject(new Error(message));
+      }
+    });
+  });
+}
+
+function runProcessAllowFailure(command, args = [], options = {}) {
   const timeoutMs = options.timeoutMs || 30000;
   const maxBuffer = options.maxBuffer || 120000;
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd || PROJECT_ROOT,
       windowsHide: true,
-      shell: false
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
     let stderr = "";
@@ -1006,12 +1077,7 @@ function runProcess(command, args = [], options = {}) {
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code === 0) {
-        resolve({ stdout, stderr, code });
-      } else {
-        const message = (stderr || stdout || `进程退出码 ${code}`).trim();
-        reject(new Error(message));
-      }
+      resolve({ stdout, stderr, code });
     });
   });
 }
@@ -1059,6 +1125,8 @@ async function refreshCodexStatus() {
       connected: false,
       command: "",
       version: "",
+      doctorOk: false,
+      reachabilityOk: false,
       model: "",
       message: "未安装 Codex"
     };
@@ -1069,21 +1137,32 @@ async function refreshCodexStatus() {
   try {
     const version = (await runProcess(command, ["--version"], { timeoutMs: 10000 })).stdout.trim();
     const login = await runProcess(command, ["login", "status"], { timeoutMs: 10000 });
-    const doctor = await runProcess(command, ["doctor", "--json"], { timeoutMs: 30000, maxBuffer: 800000 });
-    const parsed = parseJsonObjectFromText(doctor.stdout || doctor.stderr || "{}");
+    let parsed = {};
+    try {
+      const doctor = await runProcessAllowFailure(command, ["doctor", "--json"], { timeoutMs: 12000, maxBuffer: 800000 });
+      parsed = parseJsonObjectFromText(doctor.stdout || doctor.stderr || "{}");
+    } catch {
+      parsed = {};
+    }
     const configDetails = parsed?.checks?.["config.load"]?.details || {};
     const reachability = parsed?.checks?.["network.provider_reachability"]?.status;
     const auth = parsed?.checks?.["auth.credentials"]?.status;
     const loggedIn = /logged in/i.test(login.stdout || "") || auth === "ok";
-    const connected = parsed.overallStatus === "ok" && loggedIn && reachability === "ok";
+    const doctorOk = parsed.overallStatus === "ok";
+    const reachabilityOk = reachability === "ok";
+    const connected = loggedIn;
     codexStatus = {
       available: true,
       loggedIn,
       connected,
       command,
       version,
+      doctorOk,
+      reachabilityOk,
       model: String(configDetails.model || config.codexModel || config.directModel || ""),
-      message: connected ? "Codex 已连接" : "Codex 未连接"
+      message: connected
+        ? (doctorOk || reachabilityOk ? "Codex 已连接" : "Codex 已登录，网络检测较慢")
+        : "Codex 未登录"
     };
   } catch (error) {
     codexStatus = {
@@ -1092,11 +1171,14 @@ async function refreshCodexStatus() {
       connected: false,
       command,
       version: "",
+      doctorOk: false,
+      reachabilityOk: false,
       model: config.codexModel || config.directModel || "",
       message: `Codex 检测失败：${formatShortStatus(error.message)}`
     };
   }
   publishState({ config: publicConfig() });
+  appendCodexLog(`status ${new Date().toISOString()} available=${codexStatus.available} loggedIn=${codexStatus.loggedIn} connected=${codexStatus.connected} command=${codexStatus.command || ""} message=${codexStatus.message || ""}`);
   return codexStatus;
 }
 
@@ -1242,6 +1324,11 @@ function extractPointCommands(reply) {
 async function handleChat(text) {
   let reply = "我先把这条反馈写进今天的记忆里。接上 OpenClaw 或 OpenAI 直连后，这里会返回它的建议。";
   if (config.assistantMode === "codex") {
+    if (!codexModeEnabled()) {
+      await refreshCodexStatus().catch((error) => {
+        appendCodexLog(`refresh error ${new Date().toISOString()} ${error.message}`);
+      });
+    }
     if (codexModeEnabled()) {
       try {
         reply = await chatWithCodex(text);
@@ -1410,7 +1497,7 @@ function createChatWindow(prompt) {
   }
 
   chatWindow = new BrowserWindow({
-    ...getCursorBuddyBounds(380, 106),
+    ...getCursorBuddyBounds(360, 66),
     frame: false,
     transparent: true,
     show: false,
@@ -1433,6 +1520,21 @@ function createChatWindow(prompt) {
   chatWindow.on("closed", () => {
     chatWindow = null;
   });
+}
+
+function resizeChatWindow(bounds = {}) {
+  if (!chatWindow || chatWindow.isDestroyed()) return false;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const area = display.workArea;
+  const width = Math.max(260, Math.min(Number(bounds.width || 360), Math.min(560, area.width - 24)));
+  const height = Math.max(58, Math.min(Number(bounds.height || 66), Math.min(150, area.height - 24)));
+  const current = chatWindow.getBounds();
+  const nextWidth = Math.round(width);
+  const nextHeight = Math.round(height);
+  const nextX = Math.max(area.x + 10, Math.min(current.x, area.x + area.width - nextWidth - 10));
+  const nextY = Math.max(area.y + 10, Math.min(current.y, area.y + area.height - nextHeight - 10));
+  chatWindow.setBounds({ x: nextX, y: nextY, width: nextWidth, height: nextHeight }, false);
+  return true;
 }
 
 function showToast(title, message) {
@@ -1687,6 +1789,7 @@ function positionWindow(window, corner, margin = 18, nearCursor = false) {
     width,
     height
   });
+  if (window === mainWindow) keepMainWindowOnTop();
 }
 
 function getAnchoredBounds(preferredWidth, preferredHeight, corner, margin = 18) {
@@ -1707,6 +1810,7 @@ function setMainWindowMode(mode) {
   const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
   mainWindow.setMinimumSize(520, mode === "settings" ? 298 : 112);
   mainWindow.setBounds(bounds, false);
+  keepMainWindowOnTop();
 }
 
 function resizeSettingsWindow(height) {
@@ -1715,6 +1819,7 @@ function resizeSettingsWindow(height) {
   const bounds = getAnchoredBounds(820, safeHeight, "bottom-right", 18);
   mainWindow.setMinimumSize(520, Math.max(168, safeHeight - 20));
   mainWindow.setBounds(bounds, false);
+  keepMainWindowOnTop();
 }
 
 function toggleMainWindowCollapse(collapsed) {
@@ -1736,6 +1841,7 @@ function toggleMainWindowCollapse(collapsed) {
     const bounds = getAnchoredBounds(820, 132, "bottom-right", 18);
     mainWindow.setBounds(bounds, false);
   }
+  keepMainWindowOnTop();
 }
 
 function showMainWindow() {
@@ -1743,9 +1849,20 @@ function showMainWindow() {
   if (!mainWindow) return;
   positionWindow(mainWindow, "bottom-right", 18);
   mainWindow.setSkipTaskbar(true);
-  mainWindow.setAlwaysOnTop(true, "floating");
+  keepMainWindowOnTop();
   mainWindow.show();
+  keepMainWindowOnTop();
   mainWindow.focus();
+}
+
+function keepMainWindowOnTop() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
+    mainWindow.moveTop();
+  } catch {
+    mainWindow.setAlwaysOnTop(true);
+  }
 }
 
 function registerShortcuts() {
@@ -2466,8 +2583,17 @@ ipcMain.handle("config:saveDirectModel", (_event, nextConfig) => {
   publishState({ statusMessage: directModelEnabled() ? "OpenAI 直连已启用" : "OpenAI 直连未完整配置" });
   return next;
 });
-ipcMain.handle("config:saveAssistantMode", (_event, mode) => {
-  const next = saveConfig({ assistantMode: normalizeAssistantMode(mode) });
+ipcMain.handle("config:saveAssistantMode", async (_event, mode) => {
+  const assistantMode = normalizeAssistantMode(mode);
+  if (assistantMode === "codex") {
+    await refreshCodexStatus();
+    if (!codexStatus.available && !codexStatus.command) {
+      const next = publicConfig();
+      publishState({ config: next });
+      return next;
+    }
+  }
+  const next = saveConfig({ assistantMode });
   saveAssistantConfigToRootConfig();
   publishState({ config: next });
   return next;
@@ -2533,6 +2659,7 @@ ipcMain.handle("chat:submit", async (_event, text) => handleChat(String(text || 
 ipcMain.handle("chat:close", () => {
   if (chatWindow && !chatWindow.isDestroyed()) chatWindow.close();
 });
+ipcMain.handle("chat:resize", (_event, bounds) => resizeChatWindow(bounds));
 ipcMain.handle("buddy:typewriter", (_event, text) => showTypewriterNearCursor(String(text || ""), { autoCloseMs: 12000 }));
 ipcMain.handle("buddy:typewriterResize", (_event, bounds) => resizeTypewriterWindow(bounds));
 ipcMain.handle("buddy:summonMenu", () => showSummonButtonsNearCursor());
