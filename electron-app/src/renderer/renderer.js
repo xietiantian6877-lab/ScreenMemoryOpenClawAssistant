@@ -187,6 +187,7 @@ async function importMemoryPackage() {
 
 function renderState(state) {
   renderConfig(state.config);
+  renderMediaState(state.media);
   if (state.syncMessage) syncText.textContent = compactSyncText(state.syncMessage);
   if (state.packageMessage) packageText.textContent = state.packageMessage;
 
@@ -195,6 +196,19 @@ function renderState(state) {
     const title = state.observation.active_window_title || "未知窗口";
     windowText.textContent = `识别屏幕：${process} · ${title}`;
     petFace.textContent = state.observation.blocked ? "(•_•?)" : "(•‿•)";
+  }
+  renderMediaState(state.media);
+}
+
+function renderMediaState(media = {}) {
+  const playing = Boolean(media.playing);
+  petCard.classList.toggle("music-mode", playing);
+  petFace.classList.toggle("music-mode", playing);
+  if (playing) {
+    petFace.textContent = "(•‿•)";
+    petFace.title = media.source ? `正在听：${media.source}` : "正在播放音乐";
+  } else {
+    petFace.title = "";
   }
 }
 

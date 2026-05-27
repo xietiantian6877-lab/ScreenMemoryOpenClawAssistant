@@ -330,6 +330,49 @@ input::placeholder {
   transition: transform 300ms ease, box-shadow 300ms ease;
 }
 
+.pet-face::before,
+.pet-face::after {
+  content: "";
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.pet-face.music-mode {
+  position: relative;
+  animation: musicNod 720ms ease-in-out infinite;
+  box-shadow: 0 8px 18px rgba(47, 125, 246, 0.18);
+}
+
+.pet-face.music-mode::before {
+  width: 52px;
+  height: 31px;
+  top: 5px;
+  left: -4px;
+  opacity: 1;
+  border: 3px solid #2c3440;
+  border-bottom: 0;
+  border-radius: 18px 18px 8px 8px;
+}
+
+.pet-face.music-mode::after {
+  width: 8px;
+  height: 18px;
+  top: 22px;
+  left: -5px;
+  opacity: 1;
+  background:
+    linear-gradient(#2c3440, #2c3440) left center / 8px 18px no-repeat,
+    linear-gradient(#2c3440, #2c3440) 46px center / 8px 18px no-repeat;
+  border-radius: 6px;
+  filter: drop-shadow(46px 0 0 #2c3440);
+}
+
+.pet-card.music-mode {
+  background: #f6f9ff;
+}
+
 .app-shell.collapsed .pet-card {
   background: transparent;
   padding: 0;
@@ -628,5 +671,15 @@ input::placeholder {
   }
   50% {
     transform: translateY(-3px);
+  }
+}
+
+@keyframes musicNod {
+  0%,
+  100% {
+    transform: rotate(-7deg) translateY(0);
+  }
+  50% {
+    transform: rotate(7deg) translateY(-1px);
   }
 }

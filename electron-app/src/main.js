@@ -63,6 +63,8 @@ let summonWindow = null;
 let cursorBuddyTimer = null;
 let typewriterFollowTimer = null;
 let cursorBuddyHideTimer = null;
+let mediaTimer = null;
+let mediaProbeInFlight = false;
 let cursorBuddyMode = "cursor";
 let cursorBuddyPoint = null;
 let tray = null;
@@ -77,6 +79,7 @@ let lastCasualChatText = "";
 let lastBlockPromptAt = 0;
 let lastSyncMessage = "";
 let lastPackageMessage = "";
+let mediaState = { playing: false, status: "none", source: "", checkedAt: "" };
 let cursorProbeProcess = null;
 let cursorProbeBuffer = "";
 let isIBeamActive = false;
@@ -105,6 +108,7 @@ app.whenReady().then(() => {
   createTray();
   registerShortcuts();
   refreshCodexStatus().catch(() => {});
+  startMediaWatcher();
   startObserver();
 });
 
@@ -174,6 +178,40 @@ function startObserver() {
 function stopObserver() {
   if (observeTimer) clearTimeout(observeTimer);
   observeTimer = null;
+}
+
+function startMediaWatcher() {
+  stopMediaWatcher();
+  probeMediaPlayback();
+  mediaTimer = setInterval(probeMediaPlayback, 2500);
+}
+
+function stopMediaWatcher() {
+  if (mediaTimer) clearInterval(mediaTimer);
+  mediaTimer = null;
+}
+
+function probeMediaPlayback() {
+  if (mediaProbeInFlight) return;
+  mediaProbeInFlight = true;
+  getSystemMediaState()
+    .then((nextState) => {
+      const changed =
+        Boolean(nextState.playing) !== Boolean(mediaState.playing) ||
+        String(nextState.status || "") !== String(mediaState.status || "") ||
+        String(nextState.source || "") !== String(mediaState.source || "");
+      mediaState = { ...nextState, checkedAt: new Date().toISOString() };
+      if (changed) publishState({ media: mediaState });
+    })
+    .catch(() => {
+      if (mediaState.playing || mediaState.status !== "unknown") {
+        mediaState = { playing: false, status: "unknown", source: "", checkedAt: new Date().toISOString() };
+        publishState({ media: mediaState });
+      }
+    })
+    .finally(() => {
+      mediaProbeInFlight = false;
+    });
 }
 
 function scheduleNextObserve() {
@@ -284,6 +322,54 @@ try { $processName = (Get-Process -Id $pidValue).ProcessName + ".exe" } catch {}
         });
       } catch {
         resolve({ title: "", process: "", pid: 0 });
+      }
+    });
+  });
+}
+
+function getSystemMediaState() {
+  const script = `
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+function Await-WinRt($operation, [Type]$resultType) {
+  $method = [System.WindowsRuntimeSystemExtensions].GetMethods() |
+    Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' } |
+    Select-Object -First 1
+  $task = $method.MakeGenericMethod($resultType).Invoke($null, @($operation))
+  $task.GetAwaiter().GetResult()
+}
+try {
+  $manager = Await-WinRt ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+  $session = $manager.GetCurrentSession()
+  if ($null -eq $session) {
+    [PSCustomObject]@{ playing = $false; status = "none"; source = "" } | ConvertTo-Json -Compress
+    exit
+  }
+  $info = $session.GetPlaybackInfo()
+  $status = $info.PlaybackStatus.ToString()
+  [PSCustomObject]@{ playing = ($status -eq "Playing"); status = $status; source = $session.SourceAppUserModelId } | ConvertTo-Json -Compress
+} catch {
+  [PSCustomObject]@{ playing = $false; status = "unknown"; source = ""; error = $_.Exception.Message } | ConvertTo-Json -Compress
+}
+`;
+
+  return new Promise((resolve) => {
+    execFile("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { windowsHide: true, timeout: 3000 }, (error, stdout) => {
+      if (error) {
+        resolve({ playing: false, status: "unknown", source: "" });
+        return;
+      }
+      try {
+        const data = JSON.parse(String(stdout || "{}").trim() || "{}");
+        resolve({
+          playing: Boolean(data.playing),
+          status: String(data.status || "none"),
+          source: String(data.source || "")
+        });
+      } catch {
+        resolve({ playing: false, status: "unknown", source: "" });
       }
     });
   });
@@ -2162,6 +2248,7 @@ function getAppIconImage() {
 function quitApp() {
   app.isQuitting = true;
   stopObserver();
+  stopMediaWatcher();
   stopCursorBuddy();
   stopCursorDetection();
   globalShortcut.unregisterAll();
@@ -2209,6 +2296,7 @@ function getState(extra = {}) {
     statusMessage: lastObservation ? `运行中：${lastObservation.timestamp}` : "正在启动",
     syncMessage: lastSyncMessage || (config.tunnelBaseUrl ? "记忆隧穿：等待下一次写入后同步" : "记忆隧穿：未填写地址"),
     packageMessage: lastPackageMessage,
+    media: mediaState,
     memoryDir: MEMORY_DIR,
     packagesDir: PACKAGES_DIR,
     ...extra
