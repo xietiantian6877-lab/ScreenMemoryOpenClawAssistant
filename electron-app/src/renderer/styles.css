@@ -274,6 +274,7 @@ input::placeholder {
 }
 
 .tiny-line {
+  display: none;
   gap: 10px;
   min-width: 0;
   margin-top: 5px;
@@ -500,7 +501,7 @@ input::placeholder {
 .codex-row {
   color: #6f7680;
   font-size: 12px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .codex-row select {
@@ -512,9 +513,14 @@ input::placeholder {
   flex: 1 1 auto;
   overflow: hidden;
   color: #6f7680;
-  line-height: 20px;
+  line-height: 32px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.settings-codex-row .guide-toggle {
+  height: 32px;
+  align-items: center;
 }
 
 .buddy-mode,

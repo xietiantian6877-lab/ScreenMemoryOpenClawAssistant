@@ -1711,9 +1711,9 @@ function setMainWindowMode(mode) {
 
 function resizeSettingsWindow(height) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const safeHeight = Math.max(238, Math.min(420, Number(height || 318)));
+  const safeHeight = Math.max(188, Math.min(420, Number(height || 318)));
   const bounds = getAnchoredBounds(820, safeHeight, "bottom-right", 18);
-  mainWindow.setMinimumSize(520, Math.max(218, safeHeight - 20));
+  mainWindow.setMinimumSize(520, Math.max(168, safeHeight - 20));
   mainWindow.setBounds(bounds, false);
 }
 

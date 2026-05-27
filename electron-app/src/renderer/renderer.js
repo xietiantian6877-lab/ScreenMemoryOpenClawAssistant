@@ -351,7 +351,20 @@ function compactStatus(text) {
 function requestSettingsResize() {
   if (!appShell.classList.contains("settings-open") || !window.screenMemory.resizeSettings) return;
   requestAnimationFrame(() => {
-    const desiredHeight = Math.ceil(document.getElementById("settingsView").scrollHeight + 24);
+    const settingsView = document.getElementById("settingsView");
+    const title = settingsView.querySelector(".settings-title");
+    const tabs = settingsView.querySelector(".settings-tabs");
+    const activePane = settingsView.querySelector(".settings-pane.active");
+    const desiredHeight = Math.ceil(
+      18 +
+        18 +
+        (title?.scrollHeight || 0) +
+        6 +
+        (tabs?.scrollHeight || 0) +
+        10 +
+        (activePane?.scrollHeight || 0) +
+        22
+    );
     window.screenMemory.resizeSettings(desiredHeight);
   });
 }
