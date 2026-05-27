@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("screenMemory", {
   toggleCollapse: (collapsed) => ipcRenderer.invoke("window:toggleCollapse", collapsed),
   setWindowMode: (mode) => ipcRenderer.invoke("window:setMode", mode),
   setMenuOpen: (open) => ipcRenderer.invoke("window:setMenuOpen", open),
+  setMousePassthrough: (passthrough) => ipcRenderer.invoke("window:setMousePassthrough", passthrough),
   showDropdown: (payload) => ipcRenderer.invoke("dropdown:show", payload),
   closeDropdown: () => ipcRenderer.invoke("dropdown:close"),
   selectDropdown: (payload) => ipcRenderer.invoke("dropdown:select", payload),

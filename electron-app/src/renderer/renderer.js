@@ -57,6 +57,17 @@ const buddyModeOptions = [
 let apiModels = ["gpt-5.5", "gpt-5.4"];
 let codexBusy = false;
 let menuWindowOpen = false;
+let mousePassthrough = false;
+
+function updateMousePassthrough(event) {
+  if (!window.screenMemory.setMousePassthrough) return;
+  const target = event?.target;
+  const insideShell = Boolean(target?.closest?.("#appShell"));
+  const next = !insideShell;
+  if (next === mousePassthrough) return;
+  mousePassthrough = next;
+  window.screenMemory.setMousePassthrough(next);
+}
 
 function setPetFaceText(text) {
   if (petExpression) {
@@ -77,6 +88,13 @@ async function setCollapsed(collapsed) {
   });
   if (!collapsed) composerInput.focus();
 }
+
+document.addEventListener("mousemove", updateMousePassthrough);
+document.addEventListener("mouseleave", () => {
+  if (!window.screenMemory.setMousePassthrough || mousePassthrough) return;
+  mousePassthrough = true;
+  window.screenMemory.setMousePassthrough(true);
+});
 
 petCard.addEventListener("click", () => setCollapsed(!isCollapsed));
 
@@ -589,23 +607,6 @@ function compactStatus(text) {
 
 function requestSettingsResize() {
   if (!appShell.classList.contains("settings-open") || !window.screenMemory.resizeSettings) return;
-  requestAnimationFrame(() => {
-    const settingsView = document.getElementById("settingsView");
-    const title = settingsView.querySelector(".settings-title");
-    const tabs = settingsView.querySelector(".settings-tabs");
-    const activePane = settingsView.querySelector(".settings-pane.active");
-    const desiredHeight = Math.ceil(
-      18 +
-        18 +
-        (title?.scrollHeight || 0) +
-        6 +
-        (tabs?.scrollHeight || 0) +
-        10 +
-        (activePane?.scrollHeight || 0) +
-        22
-    );
-    window.screenMemory.resizeSettings(desiredHeight);
-  });
 }
 
 function renderChatFrequencyText(value) {
@@ -630,17 +631,11 @@ function compactSyncText(text) {
 }
 
 async function setSettingsOpen(open) {
-  if (window.screenMemory.setWindowMode) {
-    window.screenMemory.setWindowMode(open ? "settings" : "composer");
-  }
   requestAnimationFrame(() => {
     appShell.classList.toggle("settings-open", open);
-    appShell.classList.toggle("settings-closing", !open);
     if (open) {
-      requestSettingsResize();
       directApiKeyInput.focus();
     } else {
-      setTimeout(() => appShell.classList.remove("settings-closing"), 180);
       composerInput.focus();
     }
   });

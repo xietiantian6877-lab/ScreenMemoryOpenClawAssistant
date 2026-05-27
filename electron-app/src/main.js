@@ -5,59 +5,28 @@ const http = require("http");
 const https = require("https");
 const path = require("path");
 const os = require("os");
+const {
+  DATA_DIR,
+  MEMORY_DIR,
+  PACKAGES_DIR,
+  CONFIG_PATH,
+  ROOT_CONFIG_PATH,
+  DEFAULT_CONFIG,
+  WINDOW_BOUNDS
+} = require("./main/constants");
 
-const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
-const DATA_DIR = path.join(PROJECT_ROOT, "data");
-const MEMORY_DIR = path.join(DATA_DIR, "memory");
-const PACKAGES_DIR = path.join(DATA_DIR, "memory_packages");
-const CONFIG_PATH = path.join(DATA_DIR, "electron-config.json");
-const ROOT_CONFIG_PATH = path.join(PROJECT_ROOT, "config.toml");
-
-const DEFAULT_CONFIG = {
-  tunnelBaseUrl: "",
-  apiKey: "",
-  observeIntervalSeconds: 60,
-  observeIntervalMinSeconds: 10,
-  observeIntervalMaxSeconds: 60,
-  notifyIntervalMinutes: 60,
-  blockedCheckMinutes: 6,
-  memoryEndpoint: "/memory/sync",
-  assistantMode: "api",
-  directModelProvider: "OpenAI",
-  directBaseUrl: "https://fast.allincoding.cc",
-  directApiKey: "",
-  directModel: "gpt-5.5",
-  directReviewModel: "gpt-5.4",
-  directReasoningEffort: "xhigh",
-  directWireApi: "responses",
-  disableResponseStorage: true,
-  networkAccess: "enabled",
-  windowsWslSetupAcknowledged: true,
-  directTimeoutMs: 60000,
-  modelContextWindow: 1000000,
-  modelAutoCompactTokenLimit: 900000,
-  sendScreenshotsToModel: false,
-  buddyDefaultMode: "cursor",
-  companionMode: "watch",
-  proactiveGuidance: false,
-  casualChat: true,
-  casualChatFrequency: 70,
-  codexModel: "gpt-5.5",
-  codexReasoningEffort: "xhigh",
-  codexAccessMode: "full",
-  codexSearch: true
-};
-
-const TYPEWRITER_WIDTH = 300;
-const TYPEWRITER_HEIGHT = 112;
-const TYPEWRITER_POINTER_PAD = 18;
-const TYPEWRITER_MAX_WIDTH = 540;
-const TYPEWRITER_MAX_HEIGHT_RATIO = 0.58;
-const MAIN_SHADOW_PAD = 24;
-const MAIN_CONTENT_WIDTH = 820;
-const MAIN_COMPOSER_HEIGHT = 114;
-const MAIN_SETTINGS_HEIGHT = 318;
-const MAIN_COLLAPSED_SIZE = 74;
+const {
+  TYPEWRITER_WIDTH,
+  TYPEWRITER_HEIGHT,
+  TYPEWRITER_POINTER_PAD,
+  TYPEWRITER_MAX_WIDTH,
+  TYPEWRITER_MAX_HEIGHT_RATIO,
+  MAIN_SHADOW_PAD,
+  MAIN_CONTENT_WIDTH,
+  MAIN_COMPOSER_HEIGHT,
+  MAIN_SETTINGS_HEIGHT,
+  MAIN_COLLAPSED_SIZE
+} = WINDOW_BOUNDS;
 
 let mainWindow = null;
 let chatWindow = null;
@@ -137,7 +106,7 @@ function createMainWindow() {
     minHeight: 92,
     frame: false,
     transparent: true,
-    hasShadow: true,
+    hasShadow: false,
     show: false,
     alwaysOnTop: true,
     skipTaskbar: true,
@@ -2016,31 +1985,8 @@ function animateMainWindowBounds(targetBounds, options = {}) {
     clearInterval(mainBoundsAnimation);
     mainBoundsAnimation = null;
   }
-  const duration = Math.max(1, Number(options.duration || 180));
-  const start = mainWindow.getBounds();
-  const startedAt = Date.now();
-  const ease = (value) => 1 - Math.pow(1 - value, 3);
-  mainBoundsAnimation = setInterval(() => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      clearInterval(mainBoundsAnimation);
-      mainBoundsAnimation = null;
-      return;
-    }
-    const progress = Math.min(1, (Date.now() - startedAt) / duration);
-    const t = ease(progress);
-    mainWindow.setBounds({
-      x: Math.round(start.x + (targetBounds.x - start.x) * t),
-      y: Math.round(start.y + (targetBounds.y - start.y) * t),
-      width: Math.round(start.width + (targetBounds.width - start.width) * t),
-      height: Math.round(start.height + (targetBounds.height - start.height) * t)
-    }, false);
-    if (progress >= 1) {
-      clearInterval(mainBoundsAnimation);
-      mainBoundsAnimation = null;
-      mainWindow.setBounds(targetBounds, false);
-      keepMainWindowOnTop();
-    }
-  }, 16);
+  mainWindow.setBounds(targetBounds, false);
+  keepMainWindowOnTop();
 }
 
 function setMainWindowMode(mode) {
@@ -2066,10 +2012,7 @@ function setMainWindowMenuOpen(open) {
 
 function resizeSettingsWindow(height) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const safeHeight = Math.max(188, Math.min(420, Number(height || MAIN_SETTINGS_HEIGHT)));
-  const bounds = getAnchoredBounds(MAIN_CONTENT_WIDTH + MAIN_SHADOW_PAD * 2, safeHeight + MAIN_SHADOW_PAD * 2, "bottom-right", 18);
-  mainWindow.setMinimumSize(520, Math.max(168, safeHeight + MAIN_SHADOW_PAD));
-  animateMainWindowBounds(bounds, { duration: 160 });
+  if (mainWindow.getBounds().width <= 140) return;
   keepMainWindowOnTop();
 }
 
@@ -2934,6 +2877,11 @@ ipcMain.handle("window:hide", () => mainWindow?.hide());
 ipcMain.handle("window:close", () => mainWindow?.hide());
 ipcMain.handle("window:setMode", (_event, mode) => setMainWindowMode(mode));
 ipcMain.handle("window:setMenuOpen", (_event, open) => setMainWindowMenuOpen(Boolean(open)));
+ipcMain.handle("window:setMousePassthrough", (_event, passthrough) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  mainWindow.setIgnoreMouseEvents(Boolean(passthrough), { forward: true });
+  return true;
+});
 ipcMain.handle("window:resizeSettings", (_event, height) => resizeSettingsWindow(height));
 ipcMain.handle("window:toggleCollapse", (_event, collapsed) => toggleMainWindowCollapse(collapsed));
 ipcMain.handle("memory:openFolder", () => shell.openPath(MEMORY_DIR));
