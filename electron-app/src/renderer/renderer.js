@@ -29,6 +29,7 @@ const petFace = document.getElementById("petFace");
 const petExpression = document.getElementById("petExpression");
 const petCard = document.getElementById("petCard");
 const buddyModeSelect = document.getElementById("buddyModeSelect");
+const buddyModeMenuBtn = document.getElementById("buddyModeMenuBtn");
 const chatFrequencyInput = document.getElementById("chatFrequencyInput");
 const chatFrequencyText = document.getElementById("chatFrequencyText");
 const guidanceToggle = document.getElementById("guidanceToggle");
@@ -48,6 +49,11 @@ const reasoningOptions = [
   { value: "high", label: "高" },
   { value: "xhigh", label: "超高" }
 ];
+const buddyModeOptions = [
+  { value: "cursor", label: "鼠标旁" },
+  { value: "corner", label: "右上角" },
+  { value: "off", label: "关闭常驻" }
+];
 let apiModels = ["gpt-5.5", "gpt-5.4"];
 let codexBusy = false;
 let menuWindowOpen = false;
@@ -62,9 +68,13 @@ function setPetFaceText(text) {
 
 async function setCollapsed(collapsed) {
   isCollapsed = collapsed;
-  appShell.classList.remove("settings-open");
-  appShell.classList.toggle("collapsed", collapsed);
+  if (collapsed) appShell.classList.remove("settings-open");
+  appShell.classList.toggle("collapsing", collapsed);
   await window.screenMemory.toggleCollapse(collapsed);
+  requestAnimationFrame(() => {
+    appShell.classList.toggle("collapsed", collapsed);
+    appShell.classList.remove("collapsing");
+  });
   if (!collapsed) composerInput.focus();
 }
 
@@ -79,6 +89,10 @@ document.getElementById("packageTodayBtn").addEventListener("click", () => packa
 buddyModeSelect.addEventListener("change", async () => {
   const config = await window.screenMemory.saveBuddyMode(buddyModeSelect.value);
   renderConfig(config);
+});
+buddyModeMenuBtn?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  showDropdown("buddyMode", buddyModeMenuBtn);
 });
 chatFrequencyInput.addEventListener("input", () => {
   renderChatFrequencyText(Number(chatFrequencyInput.value));
@@ -253,6 +267,7 @@ function renderConfig(config) {
   if (document.activeElement !== tunnelInput) tunnelInput.value = tunnelUrl;
   if (document.activeElement !== directBaseUrlInput) directBaseUrlInput.value = config?.directBaseUrl || "";
   if (document.activeElement !== buddyModeSelect) buddyModeSelect.value = config?.buddyDefaultMode || "cursor";
+  updateBuddyModeMenuButton();
   const frequency = Number(config?.casualChatFrequency ?? 70);
   if (document.activeElement !== chatFrequencyInput) chatFrequencyInput.value = String(frequency);
   renderChatFrequencyText(frequency);
@@ -460,6 +475,12 @@ function updateReasoningMenuButton() {
   });
 }
 
+function updateBuddyModeMenuButton() {
+  const selected = buddyModeSelect.value || "cursor";
+  const option = buddyModeOptions.find((item) => item.value === selected);
+  if (buddyModeMenuBtn) buddyModeMenuBtn.textContent = option?.label || "鼠标旁";
+}
+
 function toggleMenu(menuWrap) {
   showDropdown(menuWrap === homeReasoningMenuWrap ? "reasoning" : "model", menuWrap.querySelector(".model-select-btn"));
 }
@@ -472,9 +493,11 @@ function closeAllMenus(resize = true) {
 function closeMenuElements() {
   homeModelMenuWrap.classList.remove("open");
   homeReasoningMenuWrap.classList.remove("open");
+  buddyModeMenuBtn?.classList.remove("open");
   appShell.classList.remove("menu-open");
   homeModelMenuBtn.setAttribute("aria-expanded", "false");
   homeReasoningMenuBtn.setAttribute("aria-expanded", "false");
+  buddyModeMenuBtn?.setAttribute("aria-expanded", "false");
 }
 
 function setMenuWindowOpen(open) {
@@ -485,20 +508,24 @@ function setMenuWindowOpen(open) {
 function showDropdown(type, button) {
   if (!button || !window.screenMemory.showDropdown) return;
   const isReasoning = type === "reasoning";
+  const isBuddyMode = type === "buddyMode";
   const wrap = isReasoning ? homeReasoningMenuWrap : homeModelMenuWrap;
   closeMenuElements();
-  wrap.classList.add("open");
+  if (isBuddyMode) button.classList.add("open");
+  else wrap.classList.add("open");
   button.setAttribute("aria-expanded", "true");
   const rect = button.getBoundingClientRect();
-  const items = isReasoning
-    ? reasoningOptions.map((item) => ({ value: item.value, label: item.label }))
-    : getCurrentModelOptions(currentConfig).map((model) => ({ value: model, label: formatModelLabel(model) }));
-  const selected = isReasoning ? homeReasoningSelect.value : homeModelSelect.value;
+  const items = isBuddyMode
+    ? buddyModeOptions
+    : isReasoning
+      ? reasoningOptions.map((item) => ({ value: item.value, label: item.label }))
+      : getCurrentModelOptions(currentConfig).map((model) => ({ value: model, label: formatModelLabel(model) }));
+  const selected = isBuddyMode ? buddyModeSelect.value : isReasoning ? homeReasoningSelect.value : homeModelSelect.value;
   window.screenMemory.showDropdown({
     type,
     selected,
     items,
-    width: isReasoning ? 92 : 168,
+    width: isBuddyMode ? 108 : isReasoning ? 92 : 168,
     rect: {
       left: rect.left,
       right: rect.right,
@@ -509,6 +536,14 @@ function showDropdown(type, button) {
 }
 
 async function handleDropdownSelect(payload = {}) {
+  if (payload.type === "buddyMode") {
+    buddyModeSelect.value = String(payload.value || "cursor");
+    updateBuddyModeMenuButton();
+    closeMenuElements();
+    const config = await window.screenMemory.saveBuddyMode(buddyModeSelect.value);
+    renderConfig(config);
+    return;
+  }
   if (payload.type === "reasoning") {
     homeReasoningSelect.value = String(payload.value || "xhigh");
     updateReasoningMenuButton();
@@ -533,7 +568,9 @@ function setSettingsTab(name) {
   const tabName = settingsPanes[name] ? name : "memory";
   settingsTabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
   Object.entries(settingsPanes).forEach(([key, pane]) => {
-    pane.classList.toggle("active", key === tabName);
+    const active = key === tabName;
+    pane.classList.toggle("active", active);
+    pane.classList.toggle("leaving", !active);
   });
   requestSettingsResize();
 }
@@ -593,11 +630,18 @@ function compactSyncText(text) {
 }
 
 async function setSettingsOpen(open) {
-  appShell.classList.toggle("settings-open", open);
   if (window.screenMemory.setWindowMode) {
-    await window.screenMemory.setWindowMode(open ? "settings" : "composer");
+    window.screenMemory.setWindowMode(open ? "settings" : "composer");
   }
-  if (open) requestSettingsResize();
-  if (open) directApiKeyInput.focus();
-  else composerInput.focus();
+  requestAnimationFrame(() => {
+    appShell.classList.toggle("settings-open", open);
+    appShell.classList.toggle("settings-closing", !open);
+    if (open) {
+      requestSettingsResize();
+      directApiKeyInput.focus();
+    } else {
+      setTimeout(() => appShell.classList.remove("settings-closing"), 180);
+      composerInput.focus();
+    }
+  });
 }

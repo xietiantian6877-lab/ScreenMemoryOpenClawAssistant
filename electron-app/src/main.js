@@ -53,6 +53,11 @@ const TYPEWRITER_HEIGHT = 112;
 const TYPEWRITER_POINTER_PAD = 18;
 const TYPEWRITER_MAX_WIDTH = 540;
 const TYPEWRITER_MAX_HEIGHT_RATIO = 0.58;
+const MAIN_SHADOW_PAD = 24;
+const MAIN_CONTENT_WIDTH = 820;
+const MAIN_COMPOSER_HEIGHT = 114;
+const MAIN_SETTINGS_HEIGHT = 318;
+const MAIN_COLLAPSED_SIZE = 74;
 
 let mainWindow = null;
 let chatWindow = null;
@@ -67,6 +72,7 @@ let typewriterFollowTimer = null;
 let cursorBuddyHideTimer = null;
 let mediaTimer = null;
 let mediaProbeInFlight = false;
+let mainBoundsAnimation = null;
 let cursorBuddyMode = "cursor";
 let cursorBuddyPoint = null;
 let tray = null;
@@ -124,7 +130,7 @@ app.on("activate", () => {
 });
 
 function createMainWindow() {
-  const bounds = getAnchoredBounds(820, 132, "bottom-right", 18);
+  const bounds = getAnchoredBounds(MAIN_CONTENT_WIDTH + MAIN_SHADOW_PAD * 2, MAIN_COMPOSER_HEIGHT + MAIN_SHADOW_PAD * 2, "bottom-right", 18);
   mainWindow = new BrowserWindow({
     ...bounds,
     minWidth: 92,
@@ -1663,7 +1669,7 @@ function showDropdownWindow(payload = {}) {
   const previousWindow = dropdownWindow;
   dropdownWindow = null;
   if (previousWindow && !previousWindow.isDestroyed()) {
-    previousWindow.removeAllListeners("closed");
+    previousWindow.removeAllListeners();
     previousWindow.close();
   }
   const items = Array.isArray(payload.items) ? payload.items : [];
@@ -1688,7 +1694,7 @@ function showDropdownWindow(payload = {}) {
   if (y < area.y + 8) y = Math.round(mainBounds.y + Number(buttonRect.bottom || 0));
   if (y + windowHeight > area.y + area.height - 8) y = area.y + area.height - windowHeight - 8;
 
-  dropdownWindow = new BrowserWindow({
+  const popup = new BrowserWindow({
     x,
     y,
     width: windowWidth,
@@ -1709,13 +1715,14 @@ function showDropdownWindow(payload = {}) {
       additionalArguments: [`--dropdown=${encodeURIComponent(JSON.stringify({ type, selected, items, width, height: contentHeight, pad: framePad }))}`]
     }
   });
-  dropdownWindow.loadFile(path.join(__dirname, "dropdown", "dropdown.html"));
-  dropdownWindow.once("ready-to-show", () => {
-    if (!dropdownWindow || dropdownWindow.isDestroyed()) return;
-    dropdownWindow.showInactive();
+  dropdownWindow = popup;
+  popup.loadFile(path.join(__dirname, "dropdown", "dropdown.html"));
+  popup.once("ready-to-show", () => {
+    if (token !== dropdownToken || popup.isDestroyed() || dropdownWindow !== popup) return;
+    popup.showInactive();
   });
-  dropdownWindow.on("closed", () => {
-    if (token !== dropdownToken) return;
+  popup.on("closed", () => {
+    if (token !== dropdownToken || dropdownWindow !== popup) return;
     dropdownWindow = null;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("dropdown:closed");
   });
@@ -1992,7 +1999,8 @@ function positionWindow(window, corner, margin = 18, nearCursor = false) {
 
 function getAnchoredBounds(preferredWidth, preferredHeight, corner, margin = 18) {
   const area = screen.getPrimaryDisplay().workArea;
-  const width = Math.min(preferredWidth, Math.max(360, area.width - margin * 2));
+  const minWidth = Math.min(360, preferredWidth);
+  const width = Math.min(preferredWidth, Math.max(minWidth, area.width - margin * 2));
   const height = Math.min(preferredHeight, Math.max(80, area.height - margin * 2));
   return {
     x: area.x + area.width - width - margin,
@@ -2002,12 +2010,45 @@ function getAnchoredBounds(preferredWidth, preferredHeight, corner, margin = 18)
   };
 }
 
+function animateMainWindowBounds(targetBounds, options = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainBoundsAnimation) {
+    clearInterval(mainBoundsAnimation);
+    mainBoundsAnimation = null;
+  }
+  const duration = Math.max(1, Number(options.duration || 180));
+  const start = mainWindow.getBounds();
+  const startedAt = Date.now();
+  const ease = (value) => 1 - Math.pow(1 - value, 3);
+  mainBoundsAnimation = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      clearInterval(mainBoundsAnimation);
+      mainBoundsAnimation = null;
+      return;
+    }
+    const progress = Math.min(1, (Date.now() - startedAt) / duration);
+    const t = ease(progress);
+    mainWindow.setBounds({
+      x: Math.round(start.x + (targetBounds.x - start.x) * t),
+      y: Math.round(start.y + (targetBounds.y - start.y) * t),
+      width: Math.round(start.width + (targetBounds.width - start.width) * t),
+      height: Math.round(start.height + (targetBounds.height - start.height) * t)
+    }, false);
+    if (progress >= 1) {
+      clearInterval(mainBoundsAnimation);
+      mainBoundsAnimation = null;
+      mainWindow.setBounds(targetBounds, false);
+      keepMainWindowOnTop();
+    }
+  }, 16);
+}
+
 function setMainWindowMode(mode) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const height = mode === "settings" ? 318 : 132;
-  const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
-  mainWindow.setMinimumSize(520, mode === "settings" ? 298 : 112);
-  mainWindow.setBounds(bounds, false);
+  const contentHeight = mode === "settings" ? MAIN_SETTINGS_HEIGHT : MAIN_COMPOSER_HEIGHT;
+  const bounds = getAnchoredBounds(MAIN_CONTENT_WIDTH + MAIN_SHADOW_PAD * 2, contentHeight + MAIN_SHADOW_PAD * 2, "bottom-right", 18);
+  mainWindow.setMinimumSize(520, contentHeight + MAIN_SHADOW_PAD);
+  animateMainWindowBounds(bounds);
   keepMainWindowOnTop();
 }
 
@@ -2017,18 +2058,18 @@ function setMainWindowMenuOpen(open) {
   if (mainMenuOpen === Boolean(open)) return;
   mainMenuOpen = Boolean(open);
   const height = open ? 214 : 132;
-  const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
+  const bounds = getAnchoredBounds(MAIN_CONTENT_WIDTH + MAIN_SHADOW_PAD * 2, height + MAIN_SHADOW_PAD * 2, "bottom-right", 18);
   mainWindow.setMinimumSize(520, open ? 190 : 112);
-  mainWindow.setBounds(bounds, false);
+  animateMainWindowBounds(bounds);
   keepMainWindowOnTop();
 }
 
 function resizeSettingsWindow(height) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const safeHeight = Math.max(188, Math.min(420, Number(height || 318)));
-  const bounds = getAnchoredBounds(820, safeHeight, "bottom-right", 18);
-  mainWindow.setMinimumSize(520, Math.max(168, safeHeight - 20));
-  mainWindow.setBounds(bounds, false);
+  const safeHeight = Math.max(188, Math.min(420, Number(height || MAIN_SETTINGS_HEIGHT)));
+  const bounds = getAnchoredBounds(MAIN_CONTENT_WIDTH + MAIN_SHADOW_PAD * 2, safeHeight + MAIN_SHADOW_PAD * 2, "bottom-right", 18);
+  mainWindow.setMinimumSize(520, Math.max(168, safeHeight + MAIN_SHADOW_PAD));
+  animateMainWindowBounds(bounds, { duration: 160 });
   keepMainWindowOnTop();
 }
 
@@ -2039,17 +2080,17 @@ function toggleMainWindowCollapse(collapsed) {
   
   if (collapsed) {
     // 收起到只显示宠物，放在右下角
-    const petSize = 92;
-    mainWindow.setMinimumSize(92, 92);
+    const petSize = MAIN_COLLAPSED_SIZE + MAIN_SHADOW_PAD * 2;
+    mainWindow.setMinimumSize(petSize, petSize);
     // 不设置最大值，让窗口可以自由调整
     const x = Math.max(area.x, area.x + area.width - petSize - 18);
     const y = Math.max(area.y, area.y + area.height - petSize - 18);
-    mainWindow.setBounds({ x, y, width: petSize, height: petSize }, false);
+    animateMainWindowBounds({ x, y, width: petSize, height: petSize }, { duration: 180 });
   } else {
     // 展开回原来大小
     mainWindow.setMinimumSize(92, 92);
-    const bounds = getAnchoredBounds(820, 132, "bottom-right", 18);
-    mainWindow.setBounds(bounds, false);
+    const bounds = getAnchoredBounds(MAIN_CONTENT_WIDTH + MAIN_SHADOW_PAD * 2, MAIN_COMPOSER_HEIGHT + MAIN_SHADOW_PAD * 2, "bottom-right", 18);
+    animateMainWindowBounds(bounds, { duration: 190 });
   }
   keepMainWindowOnTop();
 }
@@ -2057,7 +2098,8 @@ function toggleMainWindowCollapse(collapsed) {
 function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
   if (!mainWindow) return;
-  positionWindow(mainWindow, "bottom-right", 18);
+  const bounds = getAnchoredBounds(MAIN_CONTENT_WIDTH + MAIN_SHADOW_PAD * 2, MAIN_COMPOSER_HEIGHT + MAIN_SHADOW_PAD * 2, "bottom-right", 18);
+  mainWindow.setBounds(bounds, false);
   mainWindow.setSkipTaskbar(true);
   keepMainWindowOnTop();
   mainWindow.show();
