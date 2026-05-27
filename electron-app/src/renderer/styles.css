@@ -106,6 +106,7 @@ button {
 }
 
 .input-row,
+.status-row,
 .tiny-line,
 .settings-title,
 .settings-row,
@@ -114,8 +115,15 @@ button {
   align-items: center;
 }
 
+.status-row {
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 6px;
+  -webkit-app-region: no-drag;
+}
+
 .input-row {
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   -webkit-app-region: no-drag;
 }
@@ -363,6 +371,35 @@ input::placeholder {
   font-size: 13px;
   font-weight: 600;
   align-items: center;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  -webkit-app-region: no-drag;
+}
+
+.settings-tab {
+  height: 28px;
+  padding: 0 12px;
+  color: #5c6570;
+  background: #f1f1f2;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.settings-tab.active {
+  color: #fff;
+  background: #2f7df6;
+}
+
+.settings-pane {
+  display: none;
+}
+
+.settings-pane.active {
+  display: block;
 }
 
 .back-btn {

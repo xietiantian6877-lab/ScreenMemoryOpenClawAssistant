@@ -10,9 +10,8 @@
     <main class="app-shell" id="appShell">
       <section class="composer-view">
         <div class="path-line" id="windowText">识别屏幕：等待识别</div>
-        <div class="input-row">
+        <div class="status-row">
           <button id="permissionBtn" class="permission-btn codex-muted" type="button" title="Codex 权限">完全访问权限</button>
-          <input id="composerInput" placeholder="我有什么可以帮你" autocomplete="off" />
           <div class="home-model-bar">
             <button id="homeProviderBtn" class="model-chip" type="button">OpenAI</button>
             <select id="homeModelSelect" title="模型">
@@ -26,6 +25,9 @@
             </select>
           </div>
           <button id="settingsBtn" class="plain" title="设置">...</button>
+        </div>
+        <div class="input-row">
+          <input id="composerInput" placeholder="我有什么可以帮你" autocomplete="off" />
           <button id="sendBtn" class="send" title="发送">↑</button>
         </div>
         <div class="tiny-line">
@@ -40,52 +42,61 @@
           <button id="settingsBackBtn" class="back-btn" title="返回">‹</button>
           <span>设置</span>
         </div>
-        <div class="settings-row provider-row settings-provider-row">
-          <input id="directBaseUrlInput" type="url" placeholder="OpenAI base_url" autocomplete="off" />
-          <input id="directApiKeyInput" type="password" placeholder="OpenAI API key" autocomplete="off" />
-          <button id="refreshModelsBtn" class="secondary" type="button">模型</button>
-          <button id="saveDirectBtn" type="button">保存</button>
+        <nav class="settings-tabs" aria-label="设置分类">
+          <button id="settingsTabMemory" class="settings-tab active" type="button" data-tab="memory">记忆</button>
+          <button id="settingsTabModel" class="settings-tab" type="button" data-tab="model">模型</button>
+          <button id="settingsTabTunnel" class="settings-tab" type="button" data-tab="tunnel">隧穿</button>
+        </nav>
+        <div class="settings-pane active" id="memoryPane">
+          <div class="settings-row secondary-row controls-row">
+            <label class="chat-frequency">
+              <span>聊天频率</span>
+              <input id="chatFrequencyInput" type="range" min="0" max="100" step="5" />
+              <output id="chatFrequencyText">70%</output>
+            </label>
+            <label class="guide-toggle">
+              <input id="guidanceToggle" type="checkbox" />
+              <span>操作指导</span>
+            </label>
+            <label class="buddy-mode">
+              <span>说话位置</span>
+              <select id="buddyModeSelect">
+                <option value="cursor">鼠标旁</option>
+                <option value="corner">右上角</option>
+                <option value="off">关闭常驻</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-row memory-row">
+            <button id="packageTodayBtn" class="secondary">今日包</button>
+            <button id="openMemoryBtnSettings" class="secondary">打开记忆</button>
+            <button id="openPackagesBtn" class="secondary">打开记忆包</button>
+            <span id="settingsStatus">本地判断</span>
+          </div>
         </div>
-        <div class="settings-row codex-row settings-codex-row" id="codexOptions">
-          <span id="codexStatusText">Codex 检测中</span>
-          <label class="guide-toggle">
-            <input id="codexSearchToggle" type="checkbox" />
-            <span>联网</span>
-          </label>
-          <button id="refreshCodexBtn" class="secondary" type="button">检测</button>
+        <div class="settings-pane" id="modelPane">
+          <div class="settings-row provider-row settings-provider-row">
+            <input id="directBaseUrlInput" type="url" placeholder="OpenAI base_url" autocomplete="off" />
+            <input id="directApiKeyInput" type="password" placeholder="OpenAI API key" autocomplete="off" />
+            <button id="refreshModelsBtn" class="secondary" type="button">拉模型</button>
+            <button id="saveDirectBtn" type="button">保存</button>
+          </div>
+          <div class="settings-row codex-row settings-codex-row" id="codexOptions">
+            <span id="codexStatusText">Codex 检测中</span>
+            <label class="guide-toggle">
+              <input id="codexSearchToggle" type="checkbox" />
+              <span>联网</span>
+            </label>
+            <button id="refreshCodexBtn" class="secondary" type="button">检测</button>
+          </div>
         </div>
-        <div class="settings-row secondary-row controls-row">
-          <label class="chat-frequency">
-            <span>聊天频率</span>
-            <input id="chatFrequencyInput" type="range" min="0" max="100" step="5" />
-            <output id="chatFrequencyText">70%</output>
-          </label>
-          <label class="guide-toggle">
-            <input id="guidanceToggle" type="checkbox" />
-            <span>操作指导</span>
-          </label>
-          <label class="buddy-mode">
-            <span>说话位置</span>
-            <select id="buddyModeSelect">
-              <option value="cursor">鼠标旁</option>
-              <option value="corner">右上角</option>
-              <option value="off">关闭常驻</option>
-            </select>
-          </label>
-        </div>
-        <div class="settings-row compact-row">
-          <button id="packageTodayBtn" class="secondary">今日包</button>
-        </div>
-        <div class="settings-row">
-          <input id="tunnelInput" type="url" placeholder="可选：OpenClaw 隧穿地址" autocomplete="off" />
-          <button id="saveTunnelBtn" class="secondary">保存隧穿</button>
-          <button id="syncTodayBtn" class="secondary">同步</button>
-          <button id="testPopupBtn" class="secondary">测试</button>
-        </div>
-        <div class="settings-row secondary-row memory-row">
-          <button id="openMemoryBtnSettings" class="secondary">打开记忆</button>
-          <button id="openPackagesBtn" class="secondary">打开记忆包</button>
-          <span id="settingsStatus">本地判断</span>
+        <div class="settings-pane" id="tunnelPane">
+          <div class="settings-row">
+            <input id="tunnelInput" type="url" placeholder="可选：OpenClaw 隧穿地址" autocomplete="off" />
+            <button id="saveTunnelBtn" class="secondary">保存隧穿</button>
+            <button id="syncTodayBtn" class="secondary">同步</button>
+            <button id="testPopupBtn" class="secondary">测试</button>
+          </div>
         </div>
       </section>
 

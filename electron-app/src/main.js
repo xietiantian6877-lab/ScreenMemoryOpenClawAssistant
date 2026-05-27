@@ -105,11 +105,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  stopObserver();
-  stopCursorBuddy();
-  stopCursorDetection();
-  globalShortcut.unregisterAll();
-  if (process.platform !== "darwin") app.quit();
+  // Keep the assistant alive in the tray.
 });
 
 app.on("activate", () => {
@@ -117,7 +113,7 @@ app.on("activate", () => {
 });
 
 function createMainWindow() {
-  const bounds = getAnchoredBounds(820, 108, "bottom-right", 18);
+  const bounds = getAnchoredBounds(820, 132, "bottom-right", 18);
   mainWindow = new BrowserWindow({
     ...bounds,
     minWidth: 92,
@@ -126,7 +122,8 @@ function createMainWindow() {
     transparent: true,
     hasShadow: true,
     show: false,
-    skipTaskbar: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
     icon: iconPath(),
     backgroundColor: "#00000000",
     title: "屏幕记忆助手",
@@ -139,9 +136,21 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   mainWindow.once("ready-to-show", () => {
+    mainWindow.setSkipTaskbar(true);
+    mainWindow.setAlwaysOnTop(true, "floating");
     positionWindow(mainWindow, "bottom-right", 18);
     mainWindow.show();
     showToast("屏幕记忆助手已启动", "后台观察和每日记忆写入已开启。");
+  });
+  mainWindow.on("minimize", (event) => {
+    event.preventDefault();
+    mainWindow.hide();
+  });
+  mainWindow.on("close", (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -610,7 +619,7 @@ async function chatWithDirectModel(text) {
   const current = lastObservation ? JSON.stringify(lastObservation, null, 2) : "暂无观察";
   const system = [
     "你是 Windows 桌面旁边的轻陪伴伙伴，能根据当前窗口和今日记忆聊天。",
-    "当前是 API 陪聊模式：不要主动要求操作电脑，不要声称自己能执行命令。",
+    "当前是 API 运行模式：不要主动要求操作电脑，不要声称自己能执行命令。",
     "可以聊用户今天发送了什么、今日新闻、今日天气、今天的安排、当前屏幕上下文，以及评价用户的设计。",
     "不要出现“我陪看不操作”这句话。",
     "如果用户明确问怎么做，可以给简短建议；否则像朋友一样自然、具体地回应。",
@@ -1010,13 +1019,35 @@ function runProcess(command, args = [], options = {}) {
 function findCodexCommand() {
   return new Promise((resolve) => {
     execFile("where.exe", ["codex"], { windowsHide: true }, (error, stdout) => {
-      if (error) {
-        resolve("");
+      const fromPath = String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] || "";
+      if (!error && fromPath) {
+        resolve(fromPath);
         return;
       }
-      resolve(String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] || "");
+      const fallback = findCodexCommandFallback();
+      resolve(fallback);
     });
   });
+}
+
+function findCodexCommandFallback() {
+  const candidates = [
+    path.join(os.homedir(), ".vscode", "extensions"),
+    path.join(os.homedir(), ".vscode-insiders", "extensions")
+  ];
+  for (const extensionDir of candidates) {
+    try {
+      const matches = fs
+        .readdirSync(extensionDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.toLowerCase().startsWith("openai.chatgpt-"))
+        .map((entry) => path.join(extensionDir, entry.name, "bin", "windows-x86_64", "codex.exe"))
+        .filter((candidate) => fs.existsSync(candidate));
+      if (matches.length) return matches.sort().reverse()[0];
+    } catch {
+      // Extension directory may not exist.
+    }
+  }
+  return "";
 }
 
 async function refreshCodexStatus() {
@@ -1648,9 +1679,9 @@ function getAnchoredBounds(preferredWidth, preferredHeight, corner, margin = 18)
 
 function setMainWindowMode(mode) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const height = mode === "settings" ? 288 : 108;
+  const height = mode === "settings" ? 318 : 132;
   const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
-  mainWindow.setMinimumSize(520, mode === "settings" ? 268 : 92);
+  mainWindow.setMinimumSize(520, mode === "settings" ? 298 : 112);
   mainWindow.setBounds(bounds, false);
 }
 
@@ -1670,7 +1701,7 @@ function toggleMainWindowCollapse(collapsed) {
   } else {
     // 展开回原来大小
     mainWindow.setMinimumSize(92, 92);
-    const bounds = getAnchoredBounds(820, 108, "bottom-right", 18);
+    const bounds = getAnchoredBounds(820, 132, "bottom-right", 18);
     mainWindow.setBounds(bounds, false);
   }
 }
@@ -1679,6 +1710,8 @@ function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
   if (!mainWindow) return;
   positionWindow(mainWindow, "bottom-right", 18);
+  mainWindow.setSkipTaskbar(true);
+  mainWindow.setAlwaysOnTop(true, "floating");
   mainWindow.show();
   mainWindow.focus();
 }
@@ -1925,7 +1958,7 @@ function getPointBuddyBounds(point, width, height) {
 
 function createTray() {
   if (tray) return;
-  tray = new Tray(createTrayImage("#2f7df6"));
+  tray = new Tray(getAppIconImage() || createTrayImage("#2f7df6"));
   tray.setToolTip("屏幕记忆 OpenClaw 助手");
   tray.on("click", showMainWindow);
   updateTray();
@@ -1936,7 +1969,7 @@ function updateTray() {
   const observed = lastObservation ? `${lastObservation.active_process || "未知"} | ${lastObservation.active_window_title || "未知窗口"}` : "等待第一次识别";
   const modelText = directModelEnabled() ? `${config.directModelProvider} ${config.directModel}` : config.tunnelBaseUrl ? "OpenClaw 隧穿" : "本地判断";
   tray.setToolTip(`屏幕记忆 OpenClaw 助手\n${modelText}\n${observed}`);
-  tray.setImage(createTrayImage(lastObservation?.blocked ? "#d94841" : directModelEnabled() ? "#2f7df6" : "#7b8494"));
+  tray.setImage(getAppIconImage() || createTrayImage(lastObservation?.blocked ? "#d94841" : directModelEnabled() ? "#2f7df6" : "#7b8494"));
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "打开助手", click: showMainWindow },
@@ -1949,7 +1982,7 @@ function updateTray() {
       { label: "导入记忆包", click: () => importMemoryPackage().catch((error) => showToast("导入失败", error.message)) },
       { label: "打开记忆文件夹", click: () => shell.openPath(MEMORY_DIR) },
       { type: "separator" },
-      { label: "退出", click: () => app.quit() }
+      { label: "退出", click: quitApp }
     ])
   );
 }
@@ -1968,6 +2001,22 @@ function createTrayImage(color) {
 function iconPath() {
   const candidate = path.join(__dirname, "icon.png");
   return fs.existsSync(candidate) ? candidate : undefined;
+}
+
+function getAppIconImage() {
+  const candidate = iconPath();
+  if (!candidate) return null;
+  const image = nativeImage.createFromPath(candidate);
+  return image.isEmpty() ? null : image.resize({ width: 32, height: 32 });
+}
+
+function quitApp() {
+  app.isQuitting = true;
+  stopObserver();
+  stopCursorBuddy();
+  stopCursorDetection();
+  globalShortcut.unregisterAll();
+  app.quit();
 }
 
 function updateTaskbarOverlay(observation, error = false) {
@@ -2457,9 +2506,9 @@ ipcMain.handle("buddy:typewriterResize", (_event, bounds) => resizeTypewriterWin
 ipcMain.handle("buddy:summonMenu", () => showSummonButtonsNearCursor());
 ipcMain.handle("buddy:summonType", () => requestTypingNearCursor());
 ipcMain.handle("buddy:summonGuide", () => requestGuidanceNearCursor());
-ipcMain.handle("window:minimize", () => mainWindow?.minimize());
+ipcMain.handle("window:minimize", () => mainWindow?.hide());
 ipcMain.handle("window:hide", () => mainWindow?.hide());
-ipcMain.handle("window:close", () => app.quit());
+ipcMain.handle("window:close", () => mainWindow?.hide());
 ipcMain.handle("window:setMode", (_event, mode) => setMainWindowMode(mode));
 ipcMain.handle("window:toggleCollapse", (_event, collapsed) => toggleMainWindowCollapse(collapsed));
 ipcMain.handle("memory:openFolder", () => shell.openPath(MEMORY_DIR));

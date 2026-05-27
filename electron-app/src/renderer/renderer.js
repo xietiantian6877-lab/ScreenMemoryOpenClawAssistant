@@ -25,10 +25,17 @@ const buddyModeSelect = document.getElementById("buddyModeSelect");
 const chatFrequencyInput = document.getElementById("chatFrequencyInput");
 const chatFrequencyText = document.getElementById("chatFrequencyText");
 const guidanceToggle = document.getElementById("guidanceToggle");
+const settingsTabs = Array.from(document.querySelectorAll(".settings-tab"));
+const settingsPanes = {
+  memory: document.getElementById("memoryPane"),
+  model: document.getElementById("modelPane"),
+  tunnel: document.getElementById("tunnelPane")
+};
 
 let isCollapsed = false;
 let currentConfig = null;
 let availableModels = ["gpt-5.5", "gpt-5.4"];
+let codexBusy = false;
 
 async function setCollapsed(collapsed) {
   isCollapsed = collapsed;
@@ -75,6 +82,7 @@ codexSearchToggle.addEventListener("change", async () => {
 });
 refreshModelsBtn.addEventListener("click", () => refreshModels(true));
 refreshCodexBtn.addEventListener("click", refreshCodexStatus);
+settingsTabs.forEach((tab) => tab.addEventListener("click", () => setSettingsTab(tab.dataset.tab)));
 
 sendBtn.addEventListener("click", submitComposer);
 composerInput.addEventListener("keydown", (event) => {
@@ -108,14 +116,20 @@ window.screenMemory.getState().then((state) => {
 async function submitComposer() {
   const value = composerInput.value.trim();
   if (!value) return;
+  const isCodex = currentConfig?.assistantMode === "codex";
   sendBtn.disabled = true;
   sendBtn.textContent = "...";
+  if (isCodex) setCodexBusy(true);
   petFace.textContent = "(•_•)";
-  await window.screenMemory.submitChat(value);
-  composerInput.value = "";
-  petFace.textContent = "(•‿•)";
-  sendBtn.textContent = "↑";
-  sendBtn.disabled = false;
+  try {
+    await window.screenMemory.submitChat(value);
+    composerInput.value = "";
+  } finally {
+    petFace.textContent = "(•‿•)";
+    sendBtn.textContent = "↑";
+    sendBtn.disabled = false;
+    if (isCodex) setCodexBusy(false);
+  }
 }
 
 async function saveTunnel() {
@@ -137,7 +151,7 @@ async function saveDirectModel() {
     directApiKey: directApiKeyInput.value.trim(),
     directModel: homeModelSelect.value || "gpt-5.5",
     directReviewModel: homeModelSelect.value || "gpt-5.4",
-    directReasoningEffort: "xhigh",
+    directReasoningEffort: homeReasoningSelect.value || "xhigh",
     directWireApi: "auto",
     disableResponseStorage: true,
     networkAccess: "enabled",
@@ -200,8 +214,8 @@ function renderConfig(config) {
     connectionText.textContent = "Codex 已连接";
     settingsStatus.textContent = `${config.codexModel || config.directModel || "Codex"} · ${config.codexAccessMode === "ask" ? "确认权限" : "完全权限"}`;
   } else if (config?.directEnabled) {
-    connectionText.textContent = "API 陪聊";
-    settingsStatus.textContent = `${config.directModelProvider || "OpenAI"} ${config.directModel || ""}`;
+    connectionText.textContent = "API 运行";
+    settingsStatus.textContent = `${config.directModelProvider || "OpenAI"} ${getModelGroupName(config.directModel)}`;
   } else if (tunnelUrl) {
     connectionText.textContent = "隧穿已连接";
     settingsStatus.textContent = "OpenClaw 隧穿";
@@ -217,14 +231,17 @@ function renderMode(config = {}) {
   document.body.classList.toggle("codex-enabled", mode === "codex" && codexConnected);
   document.body.classList.toggle("codex-muted", !(mode === "codex" && codexConnected));
   homeProviderBtn.textContent = mode === "codex" ? "Codex" : "OpenAI";
-  homeProviderBtn.classList.toggle("muted", mode !== "codex" || !codexConnected);
+  homeProviderBtn.classList.toggle("muted", mode !== "codex");
+  homeProviderBtn.disabled = codexBusy || (mode !== "codex" && !codexConnected);
+  homeProviderBtn.title = !codexConnected ? "Codex 未连接，不能切换" : "切换 API/Codex";
   permissionBtn.classList.toggle("codex-muted", mode !== "codex" || !codexConnected);
   permissionBtn.textContent = config.codexAccessMode === "ask" ? "每步确认" : "完全访问权限";
-  permissionBtn.disabled = mode !== "codex" || !codexConnected;
-  homeReasoningSelect.disabled = mode !== "codex" || !codexConnected;
+  permissionBtn.disabled = codexBusy || mode !== "codex" || !codexConnected;
+  homeReasoningSelect.disabled = codexBusy;
+  homeModelSelect.disabled = codexBusy;
   const selectedModel = mode === "codex" ? (config.codexModel || config.directModel || "gpt-5.5") : (config.directModel || "gpt-5.5");
   homeModelSelect.value = availableModels.includes(selectedModel) ? selectedModel : "";
-  homeReasoningSelect.value = config.codexReasoningEffort || "xhigh";
+  homeReasoningSelect.value = mode === "codex" ? (config.codexReasoningEffort || "xhigh") : (config.directReasoningEffort || "xhigh");
   codexStatusText.textContent = config.codexStatus?.message || "Codex 未检测";
   codexSearchToggle.checked = config.codexSearch !== false;
 }
@@ -239,11 +256,14 @@ function readCodexSettings() {
 }
 
 async function saveAssistantMode(mode) {
+  if (codexBusy) return;
+  if (mode === "codex" && !currentConfig?.codexStatus?.connected) return;
   const config = await window.screenMemory.saveAssistantMode(mode);
   renderConfig(config);
 }
 
 async function saveHomeModel() {
+  if (codexBusy) return;
   if (currentConfig?.assistantMode === "codex") {
     const config = await window.screenMemory.saveCodexSettings(readCodexSettings());
     renderConfig(config);
@@ -256,7 +276,7 @@ async function saveHomeModel() {
     directApiKey: "",
     directModel: homeModelSelect.value || "gpt-5.5",
     directReviewModel: homeModelSelect.value || "gpt-5.4",
-    directReasoningEffort: "xhigh",
+    directReasoningEffort: homeReasoningSelect.value || "xhigh",
     directWireApi: "auto",
     disableResponseStorage: true,
     networkAccess: "enabled",
@@ -297,6 +317,28 @@ function renderModelOptions() {
     homeModelSelect.appendChild(option);
   });
   homeModelSelect.value = availableModels.includes(selected) ? selected : "";
+}
+
+function setCodexBusy(busy) {
+  codexBusy = Boolean(busy);
+  document.body.classList.toggle("codex-busy", codexBusy);
+  if (codexBusy) connectionText.textContent = "Codex 运行中";
+  renderMode(currentConfig || {});
+}
+
+function setSettingsTab(name) {
+  const tabName = settingsPanes[name] ? name : "memory";
+  settingsTabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
+  Object.entries(settingsPanes).forEach(([key, pane]) => {
+    pane.classList.toggle("active", key === tabName);
+  });
+}
+
+function getModelGroupName(model) {
+  const value = String(model || "").trim();
+  if (!value) return "未选模型";
+  const match = value.match(/^([a-z]+-[0-9.]+)/i);
+  return match ? match[1] : value;
 }
 
 function renderChatFrequencyText(value) {
