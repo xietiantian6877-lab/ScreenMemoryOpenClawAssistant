@@ -21,12 +21,20 @@
             <select id="homeModelSelect" title="模型">
               <option value="gpt-5.5">5.5</option>
             </select>
+            <div class="home-model-menu-wrap" id="homeModelMenuWrap">
+              <button id="homeModelMenuBtn" class="model-select-btn" type="button" aria-haspopup="listbox" aria-expanded="false">5.5</button>
+              <div id="homeModelMenu" class="model-menu" role="listbox"></div>
+            </div>
             <select id="homeReasoningSelect" title="推理强度">
               <option value="xhigh">中</option>
               <option value="high">高</option>
               <option value="medium">中</option>
               <option value="low">低</option>
             </select>
+            <div class="home-model-menu-wrap" id="homeReasoningMenuWrap">
+              <button id="homeReasoningMenuBtn" class="model-select-btn compact" type="button" aria-haspopup="listbox" aria-expanded="false">中</button>
+              <div id="homeReasoningMenu" class="model-menu compact" role="listbox"></div>
+            </div>
           </div>
           <button id="settingsBtn" class="plain" title="设置">...</button>
         </div>
@@ -101,7 +109,16 @@
       </section>
 
       <aside class="pet-card" id="petCard">
-        <div id="petFace" class="pet-face">(•‿•)</div>
+        <div id="petFace" class="pet-face">
+          <span class="pet-cube-face pet-cube-front"><span id="petExpression" class="pet-expression">(•‿•)</span></span>
+          <span class="pet-cube-face pet-cube-left"></span>
+          <span class="pet-cube-face pet-cube-right"></span>
+          <span class="pet-cube-face pet-cube-top"></span>
+          <span class="pet-cube-face pet-cube-bottom"></span>
+          <span class="pet-cube-face pet-cube-back"></span>
+          <span class="glow-stick glow-stick-left"></span>
+          <span class="glow-stick glow-stick-right"></span>
+        </div>
       </aside>
     </main>
 

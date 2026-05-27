@@ -169,36 +169,7 @@ textarea::placeholder {
   transform-origin: center 76%;
   transform-style: preserve-3d;
   will-change: transform;
-  animation: petFloat 1500ms ease-in-out infinite;
-}
-
-.pet-face::before,
-.pet-face::after {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-}
-
-.pet-face::before {
-  width: 26px;
-  height: 14px;
-  top: 3px;
-  left: 4px;
-  border: 2px solid #2c3440;
-  border-bottom: 0;
-  border-radius: 14px 14px 7px 7px;
-  transform: translateZ(5px);
-}
-
-.pet-face::after {
-  width: 5px;
-  height: 10px;
-  top: 14px;
-  left: 0;
-  background: linear-gradient(145deg, #2c3440, #48566b);
-  border-radius: 5px;
-  box-shadow: 29px 0 0 #2c3440;
-  transform: translateZ(6px);
+  animation: petFloat 2600ms ease-in-out infinite;
 }
 
 @keyframes bubbleIn {

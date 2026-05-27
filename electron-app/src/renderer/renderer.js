@@ -10,7 +10,13 @@ const refreshModelsBtn = document.getElementById("refreshModelsBtn");
 const permissionBtn = document.getElementById("permissionBtn");
 const homeProviderBtn = document.getElementById("homeProviderBtn");
 const homeModelSelect = document.getElementById("homeModelSelect");
+const homeModelMenuWrap = document.getElementById("homeModelMenuWrap");
+const homeModelMenuBtn = document.getElementById("homeModelMenuBtn");
+const homeModelMenu = document.getElementById("homeModelMenu");
 const homeReasoningSelect = document.getElementById("homeReasoningSelect");
+const homeReasoningMenuWrap = document.getElementById("homeReasoningMenuWrap");
+const homeReasoningMenuBtn = document.getElementById("homeReasoningMenuBtn");
+const homeReasoningMenu = document.getElementById("homeReasoningMenu");
 const codexStatusText = document.getElementById("codexStatusText");
 const codexSearchToggle = document.getElementById("codexSearchToggle");
 const refreshCodexBtn = document.getElementById("refreshCodexBtn");
@@ -20,6 +26,7 @@ const windowText = document.getElementById("windowText");
 const syncText = document.getElementById("syncText");
 const packageText = document.getElementById("packageText");
 const petFace = document.getElementById("petFace");
+const petExpression = document.getElementById("petExpression");
 const petCard = document.getElementById("petCard");
 const buddyModeSelect = document.getElementById("buddyModeSelect");
 const chatFrequencyInput = document.getElementById("chatFrequencyInput");
@@ -34,8 +41,24 @@ const settingsPanes = {
 
 let isCollapsed = false;
 let currentConfig = null;
-let availableModels = ["gpt-5.5", "gpt-5.4"];
+const codexModels = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"];
+const reasoningOptions = [
+  { value: "low", label: "低" },
+  { value: "medium", label: "中" },
+  { value: "high", label: "高" },
+  { value: "xhigh", label: "超高" }
+];
+let apiModels = ["gpt-5.5", "gpt-5.4"];
 let codexBusy = false;
+let menuWindowOpen = false;
+
+function setPetFaceText(text) {
+  if (petExpression) {
+    petExpression.textContent = text;
+  } else {
+    petFace.textContent = text;
+  }
+}
 
 async function setCollapsed(collapsed) {
   isCollapsed = collapsed;
@@ -69,6 +92,15 @@ guidanceToggle.addEventListener("change", async () => {
   renderConfig(config);
 });
 homeProviderBtn.addEventListener("click", () => saveAssistantMode(currentConfig?.assistantMode === "codex" ? "api" : "codex"));
+homeModelMenuBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleMenu(homeModelMenuWrap);
+});
+homeReasoningMenuBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleMenu(homeReasoningMenuWrap);
+});
+document.addEventListener("click", () => closeAllMenus());
 permissionBtn.addEventListener("click", async () => {
   const nextMode = currentConfig?.codexAccessMode === "ask" ? "full" : "ask";
   const config = await window.screenMemory.saveCodexSettings({ ...readCodexSettings(), codexAccessMode: nextMode });
@@ -120,12 +152,12 @@ async function submitComposer() {
   sendBtn.disabled = true;
   sendBtn.textContent = "...";
   if (isCodex) setCodexBusy(true);
-  petFace.textContent = "(•_•)";
+  setPetFaceText("(•_•)");
   try {
     await window.screenMemory.submitChat(value);
     composerInput.value = "";
   } finally {
-    petFace.textContent = "(•‿•)";
+    setPetFaceText("(•‿•)");
     sendBtn.textContent = "↑";
     sendBtn.disabled = false;
     if (isCodex) setCodexBusy(false);
@@ -195,7 +227,7 @@ function renderState(state) {
     const process = state.observation.active_process || "未知进程";
     const title = state.observation.active_window_title || "未知窗口";
     windowText.textContent = `识别屏幕：${process} · ${title}`;
-    petFace.textContent = state.observation.blocked ? "(•_•?)" : "(•‿•)";
+    setPetFaceText(state.observation.blocked ? "(•_•?)" : "(•‿•)");
   }
   renderMediaState(state.media);
 }
@@ -205,9 +237,10 @@ function renderMediaState(media = {}) {
   petCard.classList.toggle("music-mode", playing);
   petFace.classList.toggle("music-mode", playing);
   if (playing) {
-    petFace.textContent = "(•‿•)";
+    setPetFaceText("≧∀≦");
     petFace.title = media.source ? `正在听：${media.source}` : "正在播放音乐";
   } else {
+    setPetFaceText("(•‿•)");
     petFace.title = "";
   }
 }
@@ -242,6 +275,11 @@ function renderConfig(config) {
 function renderMode(config = {}) {
   const mode = config.assistantMode === "codex" ? "codex" : "api";
   const codexConnected = isCodexReady(config);
+  const renderedMode = homeModelSelect.dataset.mode || "";
+  if (renderedMode !== mode) {
+    homeModelSelect.dataset.mode = mode;
+    renderModelOptions();
+  }
   document.body.classList.toggle("codex-enabled", mode === "codex" && codexConnected);
   document.body.classList.toggle("codex-muted", !(mode === "codex" && codexConnected));
   homeProviderBtn.textContent = mode === "codex" ? "Codex" : "OpenAI";
@@ -250,12 +288,18 @@ function renderMode(config = {}) {
   homeProviderBtn.title = !codexConnected && mode !== "codex" ? "点击检测并切换 Codex" : "切换 API/Codex";
   permissionBtn.classList.toggle("codex-muted", mode !== "codex" || !codexConnected);
   permissionBtn.textContent = config.codexAccessMode === "ask" ? "每步确认" : "完全访问权限";
+  permissionBtn.title = config.codexAccessMode === "ask"
+    ? "Codex 会用 on-request，每步需要确认"
+    : "Codex 会跳过确认并允许完整访问";
   permissionBtn.disabled = codexBusy || mode !== "codex" || !codexConnected;
   homeReasoningSelect.disabled = codexBusy;
   homeModelSelect.disabled = codexBusy;
   const selectedModel = mode === "codex" ? (config.codexModel || config.directModel || "gpt-5.5") : (config.directModel || "gpt-5.5");
-  homeModelSelect.value = availableModels.includes(selectedModel) ? selectedModel : "";
+  const models = getCurrentModelOptions(config);
+  homeModelSelect.value = models.includes(selectedModel) ? selectedModel : "";
+  updateModelMenuButton();
   homeReasoningSelect.value = mode === "codex" ? (config.codexReasoningEffort || "xhigh") : (config.directReasoningEffort || "xhigh");
+  updateReasoningMenuButton();
   codexStatusText.textContent = compactStatus(config.codexStatus?.message || "Codex 未检测");
   codexStatusText.title = config.codexStatus?.message || "Codex 未检测";
   codexSearchToggle.checked = config.codexSearch !== false;
@@ -315,7 +359,7 @@ async function saveHomeModel() {
 async function refreshModels(force) {
   const result = await window.screenMemory.listModels(Boolean(force));
   if (result?.ok && result.models?.length) {
-    availableModels = result.models;
+    apiModels = result.models;
     renderModelOptions();
     renderConfig(currentConfig);
   } else if (result?.message) {
@@ -334,14 +378,115 @@ function renderModelOptions() {
   const selected = currentConfig?.assistantMode === "codex"
     ? currentConfig?.codexModel
     : currentConfig?.directModel;
+  const models = getCurrentModelOptions(currentConfig);
   homeModelSelect.innerHTML = "";
-  availableModels.forEach((model) => {
+  homeModelMenu.innerHTML = "";
+  models.forEach((model) => {
     const option = document.createElement("option");
     option.value = model;
-    option.textContent = model.replace(/^gpt-/, "");
+    option.textContent = formatModelLabel(model);
     homeModelSelect.appendChild(option);
+
+    const item = document.createElement("button");
+    item.type = "button";
+    item.role = "option";
+    item.dataset.model = model;
+    item.textContent = formatModelLabel(model);
+    item.classList.toggle("active", model === selected);
+    item.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      homeModelSelect.value = model;
+      closeAllMenus();
+      await saveHomeModel();
+    });
+    homeModelMenu.appendChild(item);
   });
-  homeModelSelect.value = availableModels.includes(selected) ? selected : "";
+  homeModelSelect.value = models.includes(selected) ? selected : "";
+  updateModelMenuButton();
+  renderReasoningOptions();
+}
+
+function getCurrentModelOptions(config = currentConfig) {
+  if (config?.assistantMode === "codex") return codexModels;
+  return apiModels;
+}
+
+function formatModelLabel(model) {
+  return String(model || "").replace(/^gpt-/i, "");
+}
+
+function updateModelMenuButton() {
+  const value = homeModelSelect.value || "";
+  homeModelMenuBtn.textContent = value ? formatModelLabel(value) : "模型";
+  Array.from(homeModelMenu.querySelectorAll("button")).forEach((item) => {
+    const active = item.dataset.model === value;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function renderReasoningOptions() {
+  const selected = homeReasoningSelect.value || "xhigh";
+  homeReasoningMenu.innerHTML = "";
+  reasoningOptions.forEach(({ value, label }) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.role = "option";
+    item.dataset.value = value;
+    item.textContent = label;
+    item.classList.toggle("active", value === selected);
+    item.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      homeReasoningSelect.value = value;
+      updateReasoningMenuButton();
+      closeAllMenus();
+      await saveHomeModel();
+    });
+    homeReasoningMenu.appendChild(item);
+  });
+  updateReasoningMenuButton();
+}
+
+function updateReasoningMenuButton() {
+  const selected = homeReasoningSelect.value || "xhigh";
+  const option = reasoningOptions.find((item) => item.value === selected);
+  homeReasoningMenuBtn.textContent = option?.label || "超高";
+  Array.from(homeReasoningMenu.querySelectorAll("button")).forEach((item) => {
+    const active = item.dataset.value === selected;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function toggleMenu(menuWrap) {
+  const open = !menuWrap.classList.contains("open");
+  closeMenuElements();
+  menuWrap.classList.toggle("open", open);
+  appShell.classList.toggle("menu-open", open);
+  const button = menuWrap.querySelector(".model-select-btn");
+  if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
+  setMenuWindowOpen(open);
+}
+
+function closeAllMenus(resize = true) {
+  closeMenuElements();
+  if (resize) setMenuWindowOpen(false);
+}
+
+function closeMenuElements() {
+  homeModelMenuWrap.classList.remove("open");
+  homeReasoningMenuWrap.classList.remove("open");
+  appShell.classList.remove("menu-open");
+  homeModelMenuBtn.setAttribute("aria-expanded", "false");
+  homeReasoningMenuBtn.setAttribute("aria-expanded", "false");
+}
+
+function setMenuWindowOpen(open) {
+  if (menuWindowOpen === Boolean(open)) return;
+  menuWindowOpen = Boolean(open);
+  if (window.screenMemory.setMenuOpen && !appShell.classList.contains("settings-open") && !appShell.classList.contains("collapsed")) {
+    window.screenMemory.setMenuOpen(Boolean(open));
+  }
 }
 
 function setCodexBusy(busy) {

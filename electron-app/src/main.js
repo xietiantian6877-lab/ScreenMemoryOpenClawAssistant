@@ -80,6 +80,7 @@ let lastBlockPromptAt = 0;
 let lastSyncMessage = "";
 let lastPackageMessage = "";
 let mediaState = { playing: false, status: "none", source: "", checkedAt: "" };
+let mainMenuOpen = false;
 let cursorProbeProcess = null;
 let cursorProbeBuffer = "";
 let isIBeamActive = false;
@@ -183,7 +184,7 @@ function stopObserver() {
 function startMediaWatcher() {
   stopMediaWatcher();
   probeMediaPlayback();
-  mediaTimer = setInterval(probeMediaPlayback, 2500);
+  mediaTimer = setInterval(probeMediaPlayback, 800);
 }
 
 function stopMediaWatcher() {
@@ -1088,6 +1089,32 @@ function appendCodexLog(line) {
   }
 }
 
+function compactProgressText(value) {
+  const text = String(value || "")
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\r/g, "\n")
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-6)
+    .join("\n")
+    .trim();
+  if (!text) return "";
+  return text.length > 520 ? `...${text.slice(-520)}` : text;
+}
+
+function updateCodexProgressFinal(message, error = null) {
+  const text = error ? `Codex 没有完成：${error.message}` : (message || "Codex 已完成。");
+  showTypewriterNearCursor(text, {
+    autoCloseMs: 18000,
+    force: true,
+    persist: false,
+    showBuddy: false,
+    update: true,
+    instant: true
+  });
+}
+
 function runProcess(command, args = [], options = {}) {
   const timeoutMs = options.timeoutMs || 30000;
   const maxBuffer = options.maxBuffer || 120000;
@@ -1106,12 +1133,16 @@ function runProcess(command, args = [], options = {}) {
       reject(new Error("请求超时"));
     }, timeoutMs);
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stdout += text;
       if (stdout.length > maxBuffer) stdout = stdout.slice(-maxBuffer);
+      if (typeof options.onStdout === "function") options.onStdout(text);
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stderr += text;
       if (stderr.length > maxBuffer) stderr = stderr.slice(-maxBuffer);
+      if (typeof options.onStderr === "function") options.onStderr(text);
     });
     if (hasInput) {
       child.stdin.write(String(options.input || ""), "utf8");
@@ -1511,29 +1542,29 @@ function casualCommentForObservation(observation) {
 
   if (!title && !processName) return "";
   if (observation?.blocked && observation?.metadata?.message && config.proactiveGuidance) {
-    options.push(`我看到这里像是卡住了：${cleanObservationText(observation.metadata.message)}`);
+    options.push(`这里像有点卡住了：${cleanObservationText(observation.metadata.message)}`);
   }
 
   if (lowerProcess.includes("code") || lowerProcess.includes("cursor") || lowerTitle.includes("visual studio")) {
-    options.push(`${stayed}你像是在改代码，焦点在「${detail}」。我先看你怎么推进，有异常信息我会记住。`);
-    options.push(`现在这段看起来和「${detail}」有关。你继续写，我会帮你把今天的修改脉络记下来。`);
+    options.push(`${stayed}这段代码看起来和「${detail}」有关。先顺着现在这条线写下去，出错信息我会帮你留着。`);
+    options.push(`「${detail}」这块像是今天的主线之一，等会儿整理记忆时它会很好用。`);
   } else if (lowerProcess.includes("chrome") || lowerProcess.includes("edge") || lowerProcess.includes("browser") || lowerProcess.includes("msedge")) {
-    options.push(`${stayed}你正在看「${detail}」。这页如果是在查资料，我会把关键上下文收进今天记忆。`);
-    options.push(`我看到你切到网页「${detail}」了。你先看内容，我会少打断但保持跟上。`);
+    options.push(`${stayed}「${detail}」这页可以先抓标题、配置项和报错文字，后面回看会省很多时间。`);
+    options.push(`这个页面先别急着关，里面和今天任务有关的线索我会记进当天上下文。`);
   } else if (lowerProcess.includes("powershell") || lowerProcess.includes("terminal") || lowerProcess.includes("cmd")) {
-    options.push(`${stayed}你在终端这边处理「${detail}」。如果输出里出现失败、连接、权限这些词，我会特别留意。`);
-    options.push(`终端现在是「${detail}」。我先陪你盯着结果，等你主动问我再拆命令。`);
+    options.push(`${stayed}终端这里先看最后两三行，尤其是失败、连接、权限这些词。`);
+    options.push(`这条终端输出如果停住了，可以先别重复运行，等它给出最后结果再判断。`);
   } else if (lowerTitle.includes("设置") || lowerTitle.includes("settings")) {
-    options.push(`${stayed}你在设置页「${detail}」。我先不指导，等你打开操作指导再主动带步骤。`);
+    options.push(`${stayed}设置页这里先确认改动有没有保存按钮，有些选项切过去就生效，有些要点保存。`);
   } else if (activity) {
-    options.push(`${stayed}我看到你在${activity}，当前窗口是「${detail}」。我会按这个上下文继续记。`);
+    options.push(`${stayed}这会儿是在${activity}，和「${detail}」有关的内容我会放进今天的上下文里。`);
   }
 
   if (summary && !summary.includes(detail)) {
-    options.push(`${stayed}${summary.slice(0, 72)}。我会把这个作为今天这段工作的线索。`);
+    options.push(`${stayed}${summary.slice(0, 72)}。这条可以当作今天这段工作的线索。`);
   }
 
-  options.push(`${stayed}我看到当前焦点是「${detail}」。我会分析这个页面，向你提供建议和搭话。`);
+  options.push(`${stayed}「${detail}」这边先看最关键的按钮、输入框或提示文字，别被页面杂项带偏。`);
 
   const candidates = options
     .map((text) => text.replace(/\s+/g, " ").trim())
@@ -1676,6 +1707,14 @@ function showTypewriterNearCursor(message, options = {}) {
   const persist = options.persist ?? (mode !== "off" && !options.force);
   if (mode !== "off" && options.showBuddy === true) {
     showCursorBuddy(options.mood || "speaking", persist ? 24 * 60 * 60 * 1000 : autoCloseMs, mode);
+  }
+  if (options.update && typewriterWindow && !typewriterWindow.isDestroyed()) {
+    typewriterWindow.webContents.send("typewriter:update", {
+      text,
+      instant: Boolean(options.instant)
+    });
+    if (mode === "cursor") startTypewriterFollow();
+    return;
   }
   if (typewriterWindow && !typewriterWindow.isDestroyed()) {
     typewriterWindow.close();
@@ -1895,6 +1934,18 @@ function setMainWindowMode(mode) {
   const height = mode === "settings" ? 318 : 132;
   const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
   mainWindow.setMinimumSize(520, mode === "settings" ? 298 : 112);
+  mainWindow.setBounds(bounds, false);
+  keepMainWindowOnTop();
+}
+
+function setMainWindowMenuOpen(open) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.getBounds().width <= 120) return;
+  if (mainMenuOpen === Boolean(open)) return;
+  mainMenuOpen = Boolean(open);
+  const height = open ? 292 : 132;
+  const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
+  mainWindow.setMinimumSize(520, open ? 260 : 112);
   mainWindow.setBounds(bounds, false);
   keepMainWindowOnTop();
 }
@@ -2757,6 +2808,7 @@ ipcMain.handle("window:minimize", () => mainWindow?.hide());
 ipcMain.handle("window:hide", () => mainWindow?.hide());
 ipcMain.handle("window:close", () => mainWindow?.hide());
 ipcMain.handle("window:setMode", (_event, mode) => setMainWindowMode(mode));
+ipcMain.handle("window:setMenuOpen", (_event, open) => setMainWindowMenuOpen(Boolean(open)));
 ipcMain.handle("window:resizeSettings", (_event, height) => resizeSettingsWindow(height));
 ipcMain.handle("window:toggleCollapse", (_event, collapsed) => toggleMainWindowCollapse(collapsed));
 ipcMain.handle("memory:openFolder", () => shell.openPath(MEMORY_DIR));
