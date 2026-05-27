@@ -3,11 +3,17 @@ const composerInput = document.getElementById("composerInput");
 const tunnelInput = document.getElementById("tunnelInput");
 const directBaseUrlInput = document.getElementById("directBaseUrlInput");
 const directApiKeyInput = document.getElementById("directApiKeyInput");
-const directModelInput = document.getElementById("directModelInput");
-const directReviewModelInput = document.getElementById("directReviewModelInput");
 const sendBtn = document.getElementById("sendBtn");
 const saveTunnelBtn = document.getElementById("saveTunnelBtn");
 const saveDirectBtn = document.getElementById("saveDirectBtn");
+const refreshModelsBtn = document.getElementById("refreshModelsBtn");
+const permissionBtn = document.getElementById("permissionBtn");
+const homeProviderBtn = document.getElementById("homeProviderBtn");
+const homeModelSelect = document.getElementById("homeModelSelect");
+const homeReasoningSelect = document.getElementById("homeReasoningSelect");
+const codexStatusText = document.getElementById("codexStatusText");
+const codexSearchToggle = document.getElementById("codexSearchToggle");
+const refreshCodexBtn = document.getElementById("refreshCodexBtn");
 const connectionText = document.getElementById("connectionText");
 const settingsStatus = document.getElementById("settingsStatus");
 const windowText = document.getElementById("windowText");
@@ -21,6 +27,8 @@ const chatFrequencyText = document.getElementById("chatFrequencyText");
 const guidanceToggle = document.getElementById("guidanceToggle");
 
 let isCollapsed = false;
+let currentConfig = null;
+let availableModels = ["gpt-5.5", "gpt-5.4"];
 
 async function setCollapsed(collapsed) {
   isCollapsed = collapsed;
@@ -32,17 +40,12 @@ async function setCollapsed(collapsed) {
 
 petCard.addEventListener("click", () => setCollapsed(!isCollapsed));
 
-document.getElementById("openMemoryBtn").addEventListener("click", () => window.screenMemory.openMemoryFolder());
 document.getElementById("openMemoryBtnSettings").addEventListener("click", () => window.screenMemory.openMemoryFolder());
 document.getElementById("openPackagesBtn").addEventListener("click", () => window.screenMemory.openPackagesFolder());
 document.getElementById("testPopupBtn").addEventListener("click", () => window.screenMemory.testBlockedPopup());
-document.getElementById("summonBtn").addEventListener("click", () => window.screenMemory.summonMenu());
 document.getElementById("settingsBtn").addEventListener("click", () => setSettingsOpen(true));
 document.getElementById("settingsBackBtn").addEventListener("click", () => setSettingsOpen(false));
 document.getElementById("packageTodayBtn").addEventListener("click", () => packageMemory("today"));
-document.getElementById("packageWeekBtn").addEventListener("click", () => packageMemory("week"));
-document.getElementById("packageAllBtn").addEventListener("click", () => packageMemory("all"));
-document.getElementById("importPackageBtn").addEventListener("click", importMemoryPackage);
 buddyModeSelect.addEventListener("change", async () => {
   const config = await window.screenMemory.saveBuddyMode(buddyModeSelect.value);
   renderConfig(config);
@@ -58,6 +61,20 @@ guidanceToggle.addEventListener("change", async () => {
   const config = await window.screenMemory.saveProactiveGuidance(guidanceToggle.checked);
   renderConfig(config);
 });
+homeProviderBtn.addEventListener("click", () => saveAssistantMode(currentConfig?.assistantMode === "codex" ? "api" : "codex"));
+permissionBtn.addEventListener("click", async () => {
+  const nextMode = currentConfig?.codexAccessMode === "ask" ? "full" : "ask";
+  const config = await window.screenMemory.saveCodexSettings({ ...readCodexSettings(), codexAccessMode: nextMode });
+  renderConfig(config);
+});
+homeModelSelect.addEventListener("change", saveHomeModel);
+homeReasoningSelect.addEventListener("change", saveHomeModel);
+codexSearchToggle.addEventListener("change", async () => {
+  const config = await window.screenMemory.saveCodexSettings(readCodexSettings());
+  renderConfig(config);
+});
+refreshModelsBtn.addEventListener("click", () => refreshModels(true));
+refreshCodexBtn.addEventListener("click", refreshCodexStatus);
 
 sendBtn.addEventListener("click", submitComposer);
 composerInput.addEventListener("keydown", (event) => {
@@ -74,13 +91,19 @@ directApiKeyInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") saveDirectModel();
 });
 
+directBaseUrlInput.addEventListener("change", () => refreshModels(true));
+
 document.getElementById("syncTodayBtn").addEventListener("click", async () => {
   syncText.textContent = "同步中";
   syncText.textContent = compactSyncText(await window.screenMemory.syncToday());
 });
 
 window.screenMemory.onStateUpdate(renderState);
-window.screenMemory.getState().then(renderState);
+window.screenMemory.getState().then((state) => {
+  renderState(state);
+  refreshModels(false);
+  refreshCodexStatus();
+});
 
 async function submitComposer() {
   const value = composerInput.value.trim();
@@ -109,10 +132,11 @@ async function saveDirectModel() {
   saveDirectBtn.textContent = "保存中";
   const config = await window.screenMemory.saveDirectModel({
     directModelProvider: "OpenAI",
+    assistantMode: currentConfig?.assistantMode || "api",
     directBaseUrl: directBaseUrlInput.value.trim(),
     directApiKey: directApiKeyInput.value.trim(),
-    directModel: directModelInput.value.trim() || "gpt-5.5",
-    directReviewModel: directReviewModelInput.value.trim() || "gpt-5.4",
+    directModel: homeModelSelect.value || "gpt-5.5",
+    directReviewModel: homeModelSelect.value || "gpt-5.4",
     directReasoningEffort: "xhigh",
     directWireApi: "auto",
     disableResponseStorage: true,
@@ -161,19 +185,22 @@ function renderState(state) {
 }
 
 function renderConfig(config) {
+  currentConfig = config || currentConfig || {};
   const tunnelUrl = config?.tunnelBaseUrl || "";
   if (document.activeElement !== tunnelInput) tunnelInput.value = tunnelUrl;
   if (document.activeElement !== directBaseUrlInput) directBaseUrlInput.value = config?.directBaseUrl || "";
-  if (document.activeElement !== directModelInput) directModelInput.value = config?.directModel || "gpt-5.5";
-  if (document.activeElement !== directReviewModelInput) directReviewModelInput.value = config?.directReviewModel || "gpt-5.4";
   if (document.activeElement !== buddyModeSelect) buddyModeSelect.value = config?.buddyDefaultMode || "cursor";
   const frequency = Number(config?.casualChatFrequency ?? 70);
   if (document.activeElement !== chatFrequencyInput) chatFrequencyInput.value = String(frequency);
   renderChatFrequencyText(frequency);
   guidanceToggle.checked = Boolean(config?.proactiveGuidance);
+  renderMode(config);
 
-  if (config?.directEnabled) {
-    connectionText.textContent = "OpenAI 直连";
+  if (config?.assistantMode === "codex" && config?.codexStatus?.connected) {
+    connectionText.textContent = "Codex 已连接";
+    settingsStatus.textContent = `${config.codexModel || config.directModel || "Codex"} · ${config.codexAccessMode === "ask" ? "确认权限" : "完全权限"}`;
+  } else if (config?.directEnabled) {
+    connectionText.textContent = "API 陪聊";
     settingsStatus.textContent = `${config.directModelProvider || "OpenAI"} ${config.directModel || ""}`;
   } else if (tunnelUrl) {
     connectionText.textContent = "隧穿已连接";
@@ -182,6 +209,94 @@ function renderConfig(config) {
     connectionText.textContent = "本地判断";
     settingsStatus.textContent = "未配置直连/隧穿";
   }
+}
+
+function renderMode(config = {}) {
+  const mode = config.assistantMode === "codex" ? "codex" : "api";
+  const codexConnected = Boolean(config.codexStatus?.connected);
+  document.body.classList.toggle("codex-enabled", mode === "codex" && codexConnected);
+  document.body.classList.toggle("codex-muted", !(mode === "codex" && codexConnected));
+  homeProviderBtn.textContent = mode === "codex" ? "Codex" : "OpenAI";
+  homeProviderBtn.classList.toggle("muted", mode !== "codex" || !codexConnected);
+  permissionBtn.classList.toggle("codex-muted", mode !== "codex" || !codexConnected);
+  permissionBtn.textContent = config.codexAccessMode === "ask" ? "每步确认" : "完全访问权限";
+  permissionBtn.disabled = mode !== "codex" || !codexConnected;
+  homeReasoningSelect.disabled = mode !== "codex" || !codexConnected;
+  const selectedModel = mode === "codex" ? (config.codexModel || config.directModel || "gpt-5.5") : (config.directModel || "gpt-5.5");
+  homeModelSelect.value = availableModels.includes(selectedModel) ? selectedModel : "";
+  homeReasoningSelect.value = config.codexReasoningEffort || "xhigh";
+  codexStatusText.textContent = config.codexStatus?.message || "Codex 未检测";
+  codexSearchToggle.checked = config.codexSearch !== false;
+}
+
+function readCodexSettings() {
+  return {
+    codexModel: homeModelSelect.value || currentConfig?.codexModel || currentConfig?.directModel || "gpt-5.5",
+    codexReasoningEffort: homeReasoningSelect.value || currentConfig?.codexReasoningEffort || "xhigh",
+    codexAccessMode: currentConfig?.codexAccessMode || "full",
+    codexSearch: codexSearchToggle.checked
+  };
+}
+
+async function saveAssistantMode(mode) {
+  const config = await window.screenMemory.saveAssistantMode(mode);
+  renderConfig(config);
+}
+
+async function saveHomeModel() {
+  if (currentConfig?.assistantMode === "codex") {
+    const config = await window.screenMemory.saveCodexSettings(readCodexSettings());
+    renderConfig(config);
+    return;
+  }
+  const config = await window.screenMemory.saveDirectModel({
+    directModelProvider: "OpenAI",
+    assistantMode: "api",
+    directBaseUrl: directBaseUrlInput.value.trim(),
+    directApiKey: "",
+    directModel: homeModelSelect.value || "gpt-5.5",
+    directReviewModel: homeModelSelect.value || "gpt-5.4",
+    directReasoningEffort: "xhigh",
+    directWireApi: "auto",
+    disableResponseStorage: true,
+    networkAccess: "enabled",
+    windowsWslSetupAcknowledged: true,
+    modelContextWindow: 1000000,
+    modelAutoCompactTokenLimit: 900000
+  });
+  renderConfig(config);
+}
+
+async function refreshModels(force) {
+  const result = await window.screenMemory.listModels(Boolean(force));
+  if (result?.ok && result.models?.length) {
+    availableModels = result.models;
+    renderModelOptions();
+    renderConfig(currentConfig);
+  } else if (result?.message) {
+    settingsStatus.textContent = result.message;
+  }
+}
+
+async function refreshCodexStatus() {
+  codexStatusText.textContent = "Codex 检测中";
+  const status = await window.screenMemory.refreshCodexStatus();
+  currentConfig = { ...(currentConfig || {}), codexStatus: status };
+  renderConfig(currentConfig);
+}
+
+function renderModelOptions() {
+  const selected = currentConfig?.assistantMode === "codex"
+    ? currentConfig?.codexModel
+    : currentConfig?.directModel;
+  homeModelSelect.innerHTML = "";
+  availableModels.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model.replace(/^gpt-/, "");
+    homeModelSelect.appendChild(option);
+  });
+  homeModelSelect.value = availableModels.includes(selected) ? selected : "";
 }
 
 function renderChatFrequencyText(value) {

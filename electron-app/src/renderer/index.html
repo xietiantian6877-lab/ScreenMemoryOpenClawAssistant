@@ -11,10 +11,20 @@
       <section class="composer-view">
         <div class="path-line" id="windowText">识别屏幕：等待识别</div>
         <div class="input-row">
-          <button id="openMemoryBtn" class="icon" title="打开记忆">+</button>
-          <button id="packageTodayBtn" class="icon" title="打包今日记忆">#</button>
-          <button id="summonBtn" class="icon" title="召唤指导">?</button>
+          <button id="permissionBtn" class="permission-btn codex-muted" type="button" title="Codex 权限">完全访问权限</button>
           <input id="composerInput" placeholder="我有什么可以帮你" autocomplete="off" />
+          <div class="home-model-bar">
+            <button id="homeProviderBtn" class="model-chip" type="button">OpenAI</button>
+            <select id="homeModelSelect" title="模型">
+              <option value="gpt-5.5">5.5</option>
+            </select>
+            <select id="homeReasoningSelect" title="推理强度">
+              <option value="xhigh">中</option>
+              <option value="high">高</option>
+              <option value="medium">中</option>
+              <option value="low">低</option>
+            </select>
+          </div>
           <button id="settingsBtn" class="plain" title="设置">...</button>
           <button id="sendBtn" class="send" title="发送">↑</button>
         </div>
@@ -29,6 +39,20 @@
         <div class="settings-title">
           <button id="settingsBackBtn" class="back-btn" title="返回">‹</button>
           <span>设置</span>
+        </div>
+        <div class="settings-row provider-row settings-provider-row">
+          <input id="directBaseUrlInput" type="url" placeholder="OpenAI base_url" autocomplete="off" />
+          <input id="directApiKeyInput" type="password" placeholder="OpenAI API key" autocomplete="off" />
+          <button id="refreshModelsBtn" class="secondary" type="button">模型</button>
+          <button id="saveDirectBtn" type="button">保存</button>
+        </div>
+        <div class="settings-row codex-row settings-codex-row" id="codexOptions">
+          <span id="codexStatusText">Codex 检测中</span>
+          <label class="guide-toggle">
+            <input id="codexSearchToggle" type="checkbox" />
+            <span>联网</span>
+          </label>
+          <button id="refreshCodexBtn" class="secondary" type="button">检测</button>
         </div>
         <div class="settings-row secondary-row controls-row">
           <label class="chat-frequency">
@@ -49,17 +73,8 @@
             </select>
           </label>
         </div>
-        <div class="settings-row">
-          <input id="directBaseUrlInput" type="url" placeholder="OpenAI base_url" autocomplete="off" />
-          <input id="directApiKeyInput" type="password" placeholder="OpenAI API key" autocomplete="off" />
-          <button id="saveDirectBtn">保存直连</button>
-        </div>
         <div class="settings-row compact-row">
-          <input id="directModelInput" placeholder="model" autocomplete="off" />
-          <input id="directReviewModelInput" placeholder="review_model" autocomplete="off" />
-          <button id="packageWeekBtn" class="secondary">7天包</button>
-          <button id="packageAllBtn" class="secondary">全部包</button>
-          <button id="importPackageBtn" class="secondary">导入包</button>
+          <button id="packageTodayBtn" class="secondary">今日包</button>
         </div>
         <div class="settings-row">
           <input id="tunnelInput" type="url" placeholder="可选：OpenClaw 隧穿地址" autocomplete="off" />

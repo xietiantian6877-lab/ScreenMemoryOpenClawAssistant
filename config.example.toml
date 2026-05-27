@@ -20,10 +20,15 @@ observe_interval_min_seconds = 10
 observe_interval_max_seconds = 60
 notify_interval_minutes = 60
 blocked_check_minutes = 6
+assistant_mode = "api"
 companion_mode = "watch"
 proactive_guidance = false
 casual_chat = true
 casual_chat_frequency = 70
+codex_model = "gpt-5.5"
+codex_reasoning_effort = "xhigh"
+codex_access_mode = "full"
+codex_search = true
 memory_dir = "data/memory"
 language = "zh-CN"
 

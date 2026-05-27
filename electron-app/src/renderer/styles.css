@@ -120,6 +120,81 @@ button {
   -webkit-app-region: no-drag;
 }
 
+.permission-btn {
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0 10px 0 22px;
+  color: #ec5b22;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  position: relative;
+  white-space: nowrap;
+}
+
+.permission-btn::before {
+  content: "!";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  color: #fff;
+  background: #ff6d2d;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.permission-btn::after {
+  content: "⌄";
+  margin-left: 4px;
+}
+
+.permission-btn.codex-muted {
+  color: #a1a7b0;
+}
+
+.permission-btn.codex-muted::before {
+  background: #b8bec7;
+}
+
+.home-model-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: 30px;
+}
+
+.model-chip,
+.home-model-bar select,
+.mode-tab {
+  height: 30px;
+  padding: 0 9px;
+  color: #555d68;
+  background: #f3f3f5;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 12px;
+  -webkit-app-region: no-drag;
+}
+
+.model-chip.muted,
+.codex-muted .home-model-bar select {
+  color: #9aa1aa;
+  background: #f5f5f6;
+}
+
+.home-model-bar select {
+  width: auto;
+  min-width: 48px;
+}
+
 input {
   width: 100%;
   min-width: 0;
@@ -323,8 +398,6 @@ input::placeholder {
 
 #directBaseUrlInput,
 #directApiKeyInput,
-#directModelInput,
-#directReviewModelInput,
 #tunnelInput {
   height: 34px;
   padding: 0 10px;
@@ -357,6 +430,30 @@ input::placeholder {
 .controls-row,
 .memory-row {
   flex-wrap: wrap;
+}
+
+.provider-row {
+  flex-wrap: wrap;
+}
+
+.mode-tabs {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.mode-tab.active {
+  color: #fff;
+  background: #2f7df6;
+}
+
+.codex-row {
+  color: #6f7680;
+  font-size: 12px;
+}
+
+.codex-row select {
+  width: auto;
 }
 
 .buddy-mode,

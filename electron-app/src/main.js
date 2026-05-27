@@ -22,6 +22,7 @@ const DEFAULT_CONFIG = {
   notifyIntervalMinutes: 60,
   blockedCheckMinutes: 6,
   memoryEndpoint: "/memory/sync",
+  assistantMode: "api",
   directModelProvider: "OpenAI",
   directBaseUrl: "https://fast.allincoding.cc",
   directApiKey: "",
@@ -40,7 +41,11 @@ const DEFAULT_CONFIG = {
   companionMode: "watch",
   proactiveGuidance: false,
   casualChat: true,
-  casualChatFrequency: 70
+  casualChatFrequency: 70,
+  codexModel: "gpt-5.5",
+  codexReasoningEffort: "xhigh",
+  codexAccessMode: "full",
+  codexSearch: true
 };
 
 const TYPEWRITER_WIDTH = 300;
@@ -75,6 +80,17 @@ let lastPackageMessage = "";
 let cursorProbeProcess = null;
 let cursorProbeBuffer = "";
 let isIBeamActive = false;
+let codexStatus = {
+  available: false,
+  loggedIn: false,
+  connected: false,
+  command: "",
+  version: "",
+  model: "",
+  message: "未检测"
+};
+let modelListCache = [];
+let modelListFetchedAt = 0;
 
 app.whenReady().then(() => {
   app.setAppUserModelId("ScreenMemory.OpenClawAssistant");
@@ -84,6 +100,7 @@ app.whenReady().then(() => {
   createMainWindow();
   createTray();
   registerShortcuts();
+  refreshCodexStatus().catch(() => {});
   startObserver();
 });
 
@@ -100,7 +117,7 @@ app.on("activate", () => {
 });
 
 function createMainWindow() {
-  const bounds = getAnchoredBounds(760, 108, "bottom-right", 18);
+  const bounds = getAnchoredBounds(820, 108, "bottom-right", 18);
   mainWindow = new BrowserWindow({
     ...bounds,
     minWidth: 92,
@@ -584,16 +601,20 @@ function directModelEnabled() {
   return config.directModelProvider === "OpenAI" && Boolean(config.directBaseUrl) && Boolean(config.directApiKey);
 }
 
+function codexModeEnabled() {
+  return config.assistantMode === "codex" && codexStatus.connected;
+}
+
 async function chatWithDirectModel(text) {
   const memory = buildRecentMemoryContext(80);
   const current = lastObservation ? JSON.stringify(lastObservation, null, 2) : "暂无观察";
   const system = [
-    "你是一个能看懂 Windows 当前任务上下文的 Clicky 风格桌面伙伴。",
-    "用户卡住通常是不会操作、不知道下一步，而不只是报错。",
-    "请像工作学习教练一样，结合当前窗口和今日记忆，给出简短、具体、可执行的下一步建议。",
-    "不要编造键盘快捷键；除非当前观察或截图明确出现快捷键，否则优先给鼠标可操作路径。",
-    "如果能根据截图确定要指的位置，可以在回复末尾附加 [POINT:x,y:label:screen0]，x/y 必须使用真实 Windows 屏幕坐标，不是缩略图坐标。用户可见回复里不要解释这个标记。",
-    "如果需要用户补充信息，只问一个问题。"
+    "你是 Windows 桌面旁边的轻陪伴伙伴，能根据当前窗口和今日记忆聊天。",
+    "当前是 API 陪聊模式：不要主动要求操作电脑，不要声称自己能执行命令。",
+    "可以聊用户今天发送了什么、今日新闻、今日天气、今天的安排、当前屏幕上下文，以及评价用户的设计。",
+    "不要出现“我陪看不操作”这句话。",
+    "如果用户明确问怎么做，可以给简短建议；否则像朋友一样自然、具体地回应。",
+    "回复要短，优先 1 到 3 句话。"
   ].join("\n");
   const userText = [
     `用户输入：${text}`,
@@ -611,6 +632,66 @@ async function chatWithDirectModel(text) {
     input: buildResponsesInput(system, userText, config.sendScreenshotsToModel ? await capturePrimaryScreenDataUrl() : "")
   });
   return extractResponseText(data) || "我看到了。建议先确认当前窗口里的主要提示，再按目标继续下一步。";
+}
+
+async function chatWithCodex(text) {
+  const prompt = buildCodexPrompt(text);
+  const outputPath = path.join(os.tmpdir(), `screen-memory-codex-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+  const args = [
+    "exec",
+    "--skip-git-repo-check",
+    "-C",
+    PROJECT_ROOT,
+    "-m",
+    config.codexModel || config.directModel || "gpt-5.5",
+    "-c",
+    `model_reasoning_effort="${escapeTomlString(config.codexReasoningEffort || config.directReasoningEffort || "xhigh")}"`,
+    "-o",
+    outputPath
+  ];
+  if (config.codexSearch) args.push("--search");
+  if (config.codexAccessMode === "full") {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else {
+    args.push("-s", "workspace-write", "-a", "on-request");
+  }
+  args.push(prompt);
+
+  try {
+    const result = await runProcess(codexStatus.command || "codex", args, {
+      cwd: PROJECT_ROOT,
+      timeoutMs: 180000,
+      maxBuffer: 240000
+    });
+    const fileReply = readText(outputPath).trim();
+    const reply = fileReply || result.stdout.trim() || result.stderr.trim();
+    return reply || "Codex 已处理，但没有返回可显示的文字。";
+  } finally {
+    try {
+      fs.unlinkSync(outputPath);
+    } catch {
+      // Ignore temp cleanup failures.
+    }
+  }
+}
+
+function buildCodexPrompt(text) {
+  const memory = buildRecentMemoryContext(80);
+  const current = lastObservation ? JSON.stringify(lastObservation, null, 2) : "暂无观察";
+  return [
+    "你正在作为 ScreenMemoryOpenClawAssistant 的 Codex 模式回复用户。",
+    "用户希望你能在需要时帮她操作电脑和修改本地项目；如果执行了工具或修改，请在最后用简短中文说明结果。",
+    "回复会显示在用户鼠标旁边，所以最终回答要短、具体，优先告诉她你做了什么或下一步是什么。",
+    "不要输出“我陪看不操作”这句话。",
+    "",
+    `用户输入：${text}`,
+    "",
+    "当前观察：",
+    current,
+    "",
+    "今日近期记忆：",
+    memory || "暂无"
+  ].join("\n");
 }
 
 function buildResponsesInput(systemText, userText, screenshotDataUrl = "") {
@@ -776,6 +857,26 @@ function buildOpenAIUrl(endpoint) {
   return new URL(`${base}/v1${normalizedEndpoint}`);
 }
 
+async function fetchOpenAIModels(force = false) {
+  const now = Date.now();
+  if (!force && modelListCache.length && now - modelListFetchedAt < 10 * 60000) return modelListCache;
+  if (!directModelEnabled()) return [];
+  const data = await requestJsonWithRetry(buildOpenAIUrl("/models"), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${config.directApiKey}`
+    },
+    timeoutMs: config.directTimeoutMs || 60000
+  });
+  const models = (Array.isArray(data?.data) ? data.data : [])
+    .map((item) => String(item.id || item.model || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "en"));
+  modelListCache = Array.from(new Set(models));
+  modelListFetchedAt = now;
+  return modelListCache;
+}
+
 function normalizeWireApi(value) {
   const wireApi = String(value || "responses").toLowerCase().replace(/[-_\s]+/g, "_");
   if (["chat", "chat_completions", "completions"].includes(wireApi)) return "chat";
@@ -865,6 +966,107 @@ function isUnsupportedResponsesError(error) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function runProcess(command, args = [], options = {}) {
+  const timeoutMs = options.timeoutMs || 30000;
+  const maxBuffer = options.maxBuffer || 120000;
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || PROJECT_ROOT,
+      windowsHide: true,
+      shell: false
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("请求超时"));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > maxBuffer) stdout = stdout.slice(-maxBuffer);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+      if (stderr.length > maxBuffer) stderr = stderr.slice(-maxBuffer);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ stdout, stderr, code });
+      } else {
+        const message = (stderr || stdout || `进程退出码 ${code}`).trim();
+        reject(new Error(message));
+      }
+    });
+  });
+}
+
+function findCodexCommand() {
+  return new Promise((resolve) => {
+    execFile("where.exe", ["codex"], { windowsHide: true }, (error, stdout) => {
+      if (error) {
+        resolve("");
+        return;
+      }
+      resolve(String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] || "");
+    });
+  });
+}
+
+async function refreshCodexStatus() {
+  const command = await findCodexCommand();
+  if (!command) {
+    codexStatus = {
+      available: false,
+      loggedIn: false,
+      connected: false,
+      command: "",
+      version: "",
+      model: "",
+      message: "未安装 Codex"
+    };
+    publishState({ config: publicConfig() });
+    return codexStatus;
+  }
+
+  try {
+    const version = (await runProcess(command, ["--version"], { timeoutMs: 10000 })).stdout.trim();
+    const login = await runProcess(command, ["login", "status"], { timeoutMs: 10000 });
+    const doctor = await runProcess(command, ["doctor", "--json"], { timeoutMs: 20000, maxBuffer: 400000 });
+    const parsed = JSON.parse(doctor.stdout || "{}");
+    const configDetails = parsed?.checks?.["config.load"]?.details || {};
+    const reachability = parsed?.checks?.["network.provider_reachability"]?.status;
+    const auth = parsed?.checks?.["auth.credentials"]?.status;
+    const loggedIn = /logged in/i.test(login.stdout || "") || auth === "ok";
+    const connected = parsed.overallStatus === "ok" && loggedIn && reachability === "ok";
+    codexStatus = {
+      available: true,
+      loggedIn,
+      connected,
+      command,
+      version,
+      model: String(configDetails.model || config.codexModel || config.directModel || ""),
+      message: connected ? "Codex 已连接" : "Codex 未连接"
+    };
+  } catch (error) {
+    codexStatus = {
+      available: true,
+      loggedIn: false,
+      connected: false,
+      command,
+      version: "",
+      model: config.codexModel || config.directModel || "",
+      message: `Codex 检测失败：${error.message}`
+    };
+  }
+  publishState({ config: publicConfig() });
+  return codexStatus;
 }
 
 function requestJson(url, options) {
@@ -984,7 +1186,17 @@ function extractPointCommands(reply) {
 
 async function handleChat(text) {
   let reply = "我先把这条反馈写进今天的记忆里。接上 OpenClaw 或 OpenAI 直连后，这里会返回它的建议。";
-  if (directModelEnabled()) {
+  if (config.assistantMode === "codex") {
+    if (codexModeEnabled()) {
+      try {
+        reply = await chatWithCodex(text);
+      } catch (error) {
+        reply = `Codex 暂时没有完成，我已记录你的输入。错误：${error.message}`;
+      }
+    } else {
+      reply = `Codex 还没连接上，我已记录你的输入。${codexStatus.message || "请先确认 Codex 已安装并登录。"}`;
+    }
+  } else if (directModelEnabled()) {
     try {
       reply = await chatWithDirectModel(text);
     } catch (error) {
@@ -1009,10 +1221,9 @@ async function handleChat(text) {
   const guidance = extractPointCommands(reply);
   if (guidance.points.length) pointCursorBuddy(guidance.points[0]);
   showTypewriterNearCursor(guidance.text, {
-    autoCloseMs: 18000,
+    autoCloseMs: config.assistantMode === "codex" ? 24000 : 18000,
     force: true,
     persist: false,
-    mode: "cursor",
     showBuddy: false
   });
   return reply;
@@ -1053,7 +1264,6 @@ function maybeCasualChat(observation) {
       autoCloseMs: 9000,
       force: true,
       persist: false,
-      mode: "cursor",
       showBuddy: false
     });
   }
@@ -1439,7 +1649,7 @@ function getAnchoredBounds(preferredWidth, preferredHeight, corner, margin = 18)
 function setMainWindowMode(mode) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const height = mode === "settings" ? 288 : 108;
-  const bounds = getAnchoredBounds(760, height, "bottom-right", 18);
+  const bounds = getAnchoredBounds(820, height, "bottom-right", 18);
   mainWindow.setMinimumSize(520, mode === "settings" ? 268 : 92);
   mainWindow.setBounds(bounds, false);
 }
@@ -1460,7 +1670,7 @@ function toggleMainWindowCollapse(collapsed) {
   } else {
     // 展开回原来大小
     mainWindow.setMinimumSize(92, 92);
-    const bounds = getAnchoredBounds(760, 108, "bottom-right", 18);
+    const bounds = getAnchoredBounds(820, 108, "bottom-right", 18);
     mainWindow.setBounds(bounds, false);
   }
 }
@@ -1478,7 +1688,7 @@ function registerShortcuts() {
   const shortcuts = ["Alt+`", "Alt+Space", "CommandOrControl+Shift+Space", "F8"];
   for (const accelerator of shortcuts) {
     const ok = globalShortcut.register(accelerator, () => {
-      showSummonButtonsNearCursor();
+      requestTypingNearCursor();
     });
     if (!ok) {
       console.warn(`${accelerator} shortcut registration failed.`);
@@ -1814,6 +2024,7 @@ function publicConfig() {
     observeIntervalMinSeconds: config.observeIntervalMinSeconds,
     observeIntervalMaxSeconds: config.observeIntervalMaxSeconds,
     memoryEndpoint: config.memoryEndpoint,
+    assistantMode: normalizeAssistantMode(config.assistantMode),
     directModelProvider: config.directModelProvider,
     directBaseUrl: config.directBaseUrl,
     directModel: config.directModel,
@@ -1831,7 +2042,12 @@ function publicConfig() {
     companionMode: config.companionMode,
     proactiveGuidance: config.proactiveGuidance,
     casualChat: config.casualChat,
-    casualChatFrequency: normalizeFrequency(config.casualChatFrequency)
+    casualChatFrequency: normalizeFrequency(config.casualChatFrequency),
+    codexModel: config.codexModel,
+    codexReasoningEffort: config.codexReasoningEffort,
+    codexAccessMode: normalizeCodexAccessMode(config.codexAccessMode),
+    codexSearch: config.codexSearch !== false,
+    codexStatus
   };
 }
 
@@ -1856,8 +2072,11 @@ function saveConfig(nextConfig) {
   tunnelBaseUrl: String(merged.tunnelBaseUrl || "").trim().replace(/\/+$/, ""),
     directBaseUrl: String(merged.directBaseUrl || "").trim().replace(/\/+$/, ""),
     directApiKey: String(merged.directApiKey || "").trim(),
+    assistantMode: normalizeAssistantMode(merged.assistantMode),
     buddyDefaultMode: normalizeBuddyMode(merged.buddyDefaultMode),
-    casualChatFrequency: normalizeFrequency(merged.casualChatFrequency)
+    casualChatFrequency: normalizeFrequency(merged.casualChatFrequency),
+    codexAccessMode: normalizeCodexAccessMode(merged.codexAccessMode),
+    codexSearch: merged.codexSearch !== false
   };
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
@@ -1960,10 +2179,15 @@ observe_interval_min_seconds = ${Number(values.observeIntervalMinSeconds || 10)}
 observe_interval_max_seconds = ${Number(values.observeIntervalMaxSeconds || 60)}
 notify_interval_minutes = ${Number(values.notifyIntervalMinutes || 60)}
 blocked_check_minutes = ${Number(values.blockedCheckMinutes || 6)}
+assistant_mode = "${escapeTomlString(normalizeAssistantMode(values.assistantMode))}"
 companion_mode = "${escapeTomlString(values.companionMode || "watch")}"
 proactive_guidance = ${values.proactiveGuidance ? "true" : "false"}
 casual_chat = ${values.casualChat === false ? "false" : "true"}
 casual_chat_frequency = ${normalizeFrequency(values.casualChatFrequency)}
+codex_model = "${escapeTomlString(values.codexModel || values.directModel || "gpt-5.5")}"
+codex_reasoning_effort = "${escapeTomlString(values.codexReasoningEffort || values.directReasoningEffort || "xhigh")}"
+codex_access_mode = "${escapeTomlString(normalizeCodexAccessMode(values.codexAccessMode))}"
+codex_search = ${values.codexSearch === false ? "false" : "true"}
 memory_dir = "data/memory"
 language = "zh-CN"`;
 }
@@ -2052,10 +2276,15 @@ function readRootTomlConfig() {
   if (assistantBlock.observe_interval_max_seconds) result.observeIntervalMaxSeconds = Number(assistantBlock.observe_interval_max_seconds);
   if (assistantBlock.notify_interval_minutes) result.notifyIntervalMinutes = Number(assistantBlock.notify_interval_minutes);
   if (assistantBlock.blocked_check_minutes) result.blockedCheckMinutes = Number(assistantBlock.blocked_check_minutes);
+  if (assistantBlock.assistant_mode) result.assistantMode = String(assistantBlock.assistant_mode);
   if (assistantBlock.companion_mode) result.companionMode = String(assistantBlock.companion_mode);
   if (assistantBlock.proactive_guidance !== undefined) result.proactiveGuidance = parseTomlBool(assistantBlock.proactive_guidance);
   if (assistantBlock.casual_chat !== undefined) result.casualChat = parseTomlBool(assistantBlock.casual_chat);
   if (assistantBlock.casual_chat_frequency !== undefined) result.casualChatFrequency = Number(assistantBlock.casual_chat_frequency);
+  if (assistantBlock.codex_model) result.codexModel = String(assistantBlock.codex_model);
+  if (assistantBlock.codex_reasoning_effort) result.codexReasoningEffort = String(assistantBlock.codex_reasoning_effort);
+  if (assistantBlock.codex_access_mode) result.codexAccessMode = String(assistantBlock.codex_access_mode);
+  if (assistantBlock.codex_search !== undefined) result.codexSearch = parseTomlBool(assistantBlock.codex_search);
   const screenBlock = readTomlBlock(text, "screen");
   if (screenBlock.enable_screenshot !== undefined) result.sendScreenshotsToModel = parseTomlBool(screenBlock.enable_screenshot);
   if (directApiKey) result.directApiKey = directApiKey;
@@ -2117,6 +2346,16 @@ function normalizeBuddyMode(value) {
   return ["cursor", "corner", "off"].includes(mode) ? mode : "cursor";
 }
 
+function normalizeAssistantMode(value) {
+  const mode = String(value || "api").toLowerCase();
+  return mode === "codex" ? "codex" : "api";
+}
+
+function normalizeCodexAccessMode(value) {
+  const mode = String(value || "full").toLowerCase();
+  return mode === "ask" ? "ask" : "full";
+}
+
 ipcMain.handle("state:get", () => getState());
 ipcMain.handle("config:saveTunnel", (_event, tunnelBaseUrl) => {
   const next = saveConfig({ tunnelBaseUrl });
@@ -2127,6 +2366,7 @@ ipcMain.handle("config:saveDirectModel", (_event, nextConfig) => {
   const normalized = {
     directBaseUrl: String(nextConfig?.directBaseUrl || config.directBaseUrl || ""),
     directApiKey: String(nextConfig?.directApiKey || config.directApiKey || ""),
+    assistantMode: normalizeAssistantMode(nextConfig?.assistantMode || config.assistantMode),
     directModelProvider: String(nextConfig?.directModelProvider || config.directModelProvider || "OpenAI"),
     directModel: String(nextConfig?.directModel || config.directModel || "gpt-5.5"),
     directReviewModel: String(nextConfig?.directReviewModel || config.directReviewModel || "gpt-5.4"),
@@ -2144,6 +2384,36 @@ ipcMain.handle("config:saveDirectModel", (_event, nextConfig) => {
   const next = saveConfig(normalized);
   publishState({ statusMessage: directModelEnabled() ? "OpenAI 直连已启用" : "OpenAI 直连未完整配置" });
   return next;
+});
+ipcMain.handle("config:saveAssistantMode", (_event, mode) => {
+  const next = saveConfig({ assistantMode: normalizeAssistantMode(mode) });
+  saveAssistantConfigToRootConfig();
+  publishState({ config: next });
+  return next;
+});
+ipcMain.handle("config:saveCodexSettings", (_event, nextConfig) => {
+  const next = saveConfig({
+    assistantMode: "codex",
+    codexModel: String(nextConfig?.codexModel || config.codexModel || config.directModel || "gpt-5.5"),
+    codexReasoningEffort: String(nextConfig?.codexReasoningEffort || config.codexReasoningEffort || config.directReasoningEffort || "xhigh"),
+    codexAccessMode: normalizeCodexAccessMode(nextConfig?.codexAccessMode || config.codexAccessMode),
+    codexSearch: nextConfig?.codexSearch === undefined ? config.codexSearch !== false : Boolean(nextConfig.codexSearch)
+  });
+  saveAssistantConfigToRootConfig();
+  publishState({ config: next });
+  return next;
+});
+ipcMain.handle("models:list", async (_event, force) => {
+  try {
+    const models = await fetchOpenAIModels(Boolean(force));
+    return { ok: true, models };
+  } catch (error) {
+    return { ok: false, models: [], message: formatDirectModelError(error) };
+  }
+});
+ipcMain.handle("codex:refreshStatus", async () => {
+  const status = await refreshCodexStatus();
+  return status;
 });
 ipcMain.handle("config:saveBuddyMode", (_event, mode) => {
   const buddyDefaultMode = normalizeBuddyMode(mode);
