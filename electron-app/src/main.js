@@ -1533,7 +1533,7 @@ function casualCommentForObservation(observation) {
     options.push(`${stayed}${summary.slice(0, 72)}。我会把这个作为今天这段工作的线索。`);
   }
 
-  options.push(`${stayed}我看到当前焦点是「${detail}」。我先陪看，不主动教操作。`);
+  options.push(`${stayed}我看到当前焦点是「${detail}」。我会分析这个页面，向你提供建议和搭话。`);
 
   const candidates = options
     .map((text) => text.replace(/\s+/g, " ").trim())

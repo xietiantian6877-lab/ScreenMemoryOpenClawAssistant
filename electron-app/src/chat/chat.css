@@ -27,9 +27,10 @@ button {
 
 .bubble {
   width: calc(100vw - 18px);
-  height: calc(100vh - 12px);
+  min-height: 46px;
   margin: 6px 12px 6px 6px;
   display: flex;
+  align-items: flex-start;
   justify-content: flex-start;
   overflow: hidden;
   color: #20242c;
@@ -38,9 +39,10 @@ button {
 }
 
 .dialog {
-  height: 100%;
+  height: auto;
+  min-height: 46px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   -webkit-app-region: drag;
 }
@@ -147,17 +149,56 @@ textarea::placeholder {
 }
 
 .pet-face {
+  position: relative;
   width: 34px;
   height: 34px;
   display: grid;
   place-items: center;
   color: #2c3440;
-  background: #fff;
+  overflow: visible;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(232, 238, 248, 0.98));
   border: 1px solid #e2e4e8;
   border-radius: 9px;
+  box-shadow:
+    inset -3px -4px 0 rgba(196, 207, 224, 0.5),
+    inset 2px 2px 0 rgba(255, 255, 255, 0.95),
+    0 3px 7px rgba(18, 24, 38, 0.08);
   font-size: 10px;
   font-weight: 700;
+  transform-origin: center 76%;
+  transform-style: preserve-3d;
+  will-change: transform;
   animation: petFloat 1500ms ease-in-out infinite;
+}
+
+.pet-face::before,
+.pet-face::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.pet-face::before {
+  width: 26px;
+  height: 14px;
+  top: 3px;
+  left: 4px;
+  border: 2px solid #2c3440;
+  border-bottom: 0;
+  border-radius: 14px 14px 7px 7px;
+  transform: translateZ(5px);
+}
+
+.pet-face::after {
+  width: 5px;
+  height: 10px;
+  top: 14px;
+  left: 0;
+  background: linear-gradient(145deg, #2c3440, #48566b);
+  border-radius: 5px;
+  box-shadow: 29px 0 0 #2c3440;
+  transform: translateZ(6px);
 }
 
 @keyframes bubbleIn {
@@ -194,11 +235,25 @@ textarea::placeholder {
 }
 
 @keyframes petFloat {
-  0%,
-  100% {
-    transform: translateY(0);
+  0% {
+    transform: perspective(110px) rotateY(-7deg) rotateZ(-2deg) rotateX(0deg) translateY(0);
+  }
+  16% {
+    transform: perspective(110px) rotateY(-9deg) rotateZ(-2.5deg) rotateX(7deg) translateY(1px);
+  }
+  34% {
+    transform: perspective(110px) rotateY(0deg) rotateZ(0deg) rotateX(0deg) translateY(-1px);
   }
   50% {
-    transform: translateY(-3px);
+    transform: perspective(110px) rotateY(8deg) rotateZ(2deg) rotateX(0deg) translateY(0);
+  }
+  66% {
+    transform: perspective(110px) rotateY(10deg) rotateZ(2.5deg) rotateX(7deg) translateY(1px);
+  }
+  84% {
+    transform: perspective(110px) rotateY(0deg) rotateZ(0deg) rotateX(0deg) translateY(-1px);
+  }
+  100% {
+    transform: perspective(110px) rotateY(-7deg) rotateZ(-2deg) rotateX(0deg) translateY(0);
   }
 }
