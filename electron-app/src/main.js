@@ -6,6 +6,7 @@ const https = require("https");
 const path = require("path");
 const os = require("os");
 const {
+  PROJECT_ROOT,
   DATA_DIR,
   MEMORY_DIR,
   PACKAGES_DIR,
