@@ -274,9 +274,13 @@ button {
 
 .model-select-btn {
   min-width: 74px;
+  max-width: 188px;
   padding-right: 24px;
   position: relative;
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-select-btn.compact {
@@ -740,12 +744,32 @@ input::placeholder {
 
 #directBaseUrlInput,
 #directApiKeyInput,
+#modelGroupNameInput,
+#agentAccessSelect,
 #tunnelInput {
   height: 34px;
   padding: 0 10px;
   background: #fff;
   border: 1px solid #d9dce2;
   border-radius: 10px;
+}
+
+#modelGroupNameInput {
+  flex: 0 1 132px;
+}
+
+#directBaseUrlInput {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+#directApiKeyInput {
+  flex: 1 1 190px;
+  min-width: 160px;
+}
+
+#agentAccessSelect {
+  flex: 0 0 94px;
 }
 
 .settings-row button,
@@ -783,6 +807,87 @@ input::placeholder {
 
 .provider-row {
   flex-wrap: wrap;
+}
+
+.model-groups {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+  -webkit-app-region: no-drag;
+}
+
+.model-group-btn {
+  height: 32px;
+  max-width: 210px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  color: #4f5763;
+  background: #f5f6f8;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: var(--settings-control-font-size);
+  white-space: nowrap;
+}
+
+.model-group-btn.active {
+  color: #1f5fbf;
+  background: #eef5ff;
+  border-color: #cfe0ff;
+}
+
+.model-group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-group-count {
+  color: #8a929e;
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #aab1bb;
+}
+
+.status-dot.connected {
+  background: #1eae62;
+}
+
+.status-dot.checking,
+.status-dot.unknown {
+  background: #d99a22;
+}
+
+.status-dot.error {
+  background: #d94841;
+}
+
+.status-dot.missing {
+  background: #aab1bb;
+}
+
+.agent-toggle {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: #4f5763;
+  white-space: nowrap;
+}
+
+.agent-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2f7df6;
 }
 
 .mode-tabs {

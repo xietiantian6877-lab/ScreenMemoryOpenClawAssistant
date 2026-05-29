@@ -84,11 +84,22 @@
           </div>
         </div>
         <div class="settings-pane" id="modelPane">
+          <div class="model-groups" id="modelGroupsList"></div>
           <div class="settings-row provider-row settings-provider-row">
-            <input id="directBaseUrlInput" type="url" placeholder="OpenAI base_url" autocomplete="off" />
-            <input id="directApiKeyInput" type="password" placeholder="OpenAI API key" autocomplete="off" />
-            <button id="refreshModelsBtn" class="secondary" type="button">拉模型</button>
-            <button id="saveDirectBtn" type="button">保存</button>
+            <input id="modelGroupNameInput" type="text" placeholder="模型组名称" autocomplete="off" />
+            <input id="directBaseUrlInput" type="url" placeholder="模型组地址" autocomplete="off" />
+            <input id="directApiKeyInput" type="password" placeholder="API key" autocomplete="new-password" />
+            <label class="agent-toggle">
+              <input id="agentEnabledToggle" type="checkbox" />
+              <span>Agent</span>
+            </label>
+            <select id="agentAccessSelect" title="Agent 权限">
+              <option value="full">完全访问</option>
+              <option value="ask">每步确认</option>
+            </select>
+            <button id="addModelGroupBtn" class="secondary" type="button">添加模型</button>
+            <button id="refreshModelsBtn" class="secondary" type="button">刷新</button>
+            <button id="saveDirectBtn" type="button">确认</button>
           </div>
           <div class="settings-row codex-row settings-codex-row" id="codexOptions">
             <span id="codexStatusText">Codex 检测中</span>

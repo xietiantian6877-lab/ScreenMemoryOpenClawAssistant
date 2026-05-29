@@ -80,8 +80,8 @@ let codexStatus = {
   model: "",
   message: "未检测"
 };
-let modelListCache = [];
-let modelListFetchedAt = 0;
+let modelListCacheByGroup = {};
+let modelGroupStatus = {};
 
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 
@@ -686,8 +686,211 @@ async function postJson(endpoint, body) {
   });
 }
 
+function slugifyModelGroupId(value, fallback = "model-group") {
+  const slug = String(value || "")
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 44);
+  return slug || fallback;
+}
+
+function uniqueValues(values) {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function inferLegacyModelGroupName(baseUrl, provider) {
+  const url = String(baseUrl || "").toLowerCase();
+  if (url.includes("fast.allincoding.cc")) return "非本机操作应用";
+  return String(provider || "OpenAI").trim() || "OpenAI";
+}
+
+function buildLegacyModelGroup(source = {}) {
+  const baseUrl = String(source.directBaseUrl || "https://fast.allincoding.cc").trim().replace(/\/+$/, "");
+  const name = inferLegacyModelGroupName(baseUrl, source.directModelProvider);
+  const id = baseUrl.includes("fast.allincoding.cc") ? "allincoding" : slugifyModelGroupId(name || baseUrl);
+  return normalizeModelGroup({
+    id,
+    name,
+    baseUrl,
+    apiKey: source.directApiKey || "",
+    model: source.directModel || "gpt-5.5",
+    reviewModel: source.directReviewModel || source.directModel || "gpt-5.4",
+    reasoningEffort: source.directReasoningEffort || "xhigh",
+    wireApi: source.directWireApi || "auto",
+    agentEnabled: false,
+    agentAccessMode: source.codexAccessMode || "full",
+    models: uniqueValues([source.directModel, source.directReviewModel, "gpt-5.5", "gpt-5.4"])
+  });
+}
+
+function normalizeModelGroup(raw = {}, index = 0) {
+  const baseUrl = String(raw.baseUrl || raw.directBaseUrl || "").trim().replace(/\/+$/, "");
+  const name = String(raw.name || raw.label || inferLegacyModelGroupName(baseUrl, raw.provider)).trim() || `模型组 ${index + 1}`;
+  const id = slugifyModelGroupId(raw.id || name || baseUrl, `model-group-${index + 1}`);
+  const model = String(raw.model || raw.directModel || "gpt-5.5").trim() || "gpt-5.5";
+  const reviewModel = String(raw.reviewModel || raw.directReviewModel || model || "gpt-5.4").trim() || model;
+  const models = uniqueValues([...(Array.isArray(raw.models) ? raw.models : []), model, reviewModel]);
+  return {
+    id,
+    name,
+    baseUrl,
+    apiKey: String(raw.apiKey || raw.directApiKey || "").trim(),
+    model,
+    reviewModel,
+    reasoningEffort: normalizeReasoningEffort(raw.reasoningEffort || raw.directReasoningEffort || "xhigh"),
+    wireApi: normalizeWireApi(raw.wireApi || raw.directWireApi || "auto"),
+    agentEnabled: Boolean(raw.agentEnabled),
+    agentAccessMode: normalizeCodexAccessMode(raw.agentAccessMode || raw.codexAccessMode || "full"),
+    models
+  };
+}
+
+function normalizeModelGroups(source = {}) {
+  const sourceGroups = Array.isArray(source.modelGroups) ? source.modelGroups : [];
+  const groups = [];
+  for (const raw of sourceGroups) {
+    const group = normalizeModelGroup(raw, groups.length);
+    const existingIndex = groups.findIndex((item) => item.id === group.id || (item.baseUrl && group.baseUrl && item.baseUrl === group.baseUrl));
+    if (existingIndex >= 0) {
+      groups[existingIndex] = {
+        ...groups[existingIndex],
+        ...group,
+        apiKey: group.apiKey || groups[existingIndex].apiKey,
+        models: uniqueValues([...(groups[existingIndex].models || []), ...(group.models || [])])
+      };
+    } else {
+      groups.push(group);
+    }
+  }
+
+  if (!groups.length) groups.push(buildLegacyModelGroup(source));
+
+  const directBaseUrl = String(source.directBaseUrl || "").trim().replace(/\/+$/, "");
+  if (directBaseUrl && source.directApiKey) {
+    const directGroup = groups.find((group) => group.baseUrl === directBaseUrl);
+    if (directGroup && !directGroup.apiKey) directGroup.apiKey = String(source.directApiKey || "").trim();
+  }
+  return groups;
+}
+
+function normalizeConfigShape(source = {}) {
+  const groups = normalizeModelGroups(source);
+  const requestedActiveId = String(source.activeModelGroupId || "").trim();
+  const directBaseUrl = String(source.directBaseUrl || "").trim().replace(/\/+$/, "");
+  const active =
+    groups.find((group) => group.id === requestedActiveId) ||
+    groups.find((group) => directBaseUrl && group.baseUrl === directBaseUrl) ||
+    groups[0];
+  return {
+    ...source,
+    modelGroups: groups,
+    activeModelGroupId: active.id,
+    directModelProvider: "OpenAI",
+    directBaseUrl: active.baseUrl,
+    directApiKey: active.apiKey,
+    directModel: active.model,
+    directReviewModel: active.reviewModel,
+    directReasoningEffort: active.reasoningEffort,
+    directWireApi: active.wireApi,
+    codexAccessMode: normalizeCodexAccessMode(source.codexAccessMode || active.agentAccessMode || "full")
+  };
+}
+
+function getModelGroup(groupId = config.activeModelGroupId) {
+  const groups = Array.isArray(config.modelGroups) ? config.modelGroups : [];
+  return groups.find((group) => group.id === groupId) || groups.find((group) => group.id === config.activeModelGroupId) || groups[0] || null;
+}
+
+function getActiveModelGroup() {
+  return getModelGroup(config.activeModelGroupId);
+}
+
+function getModelGroupStatus(group) {
+  if (!group) return { state: "missing", message: "未配置", checkedAt: "", modelCount: 0 };
+  const current = modelGroupStatus[group.id];
+  if (current) return current;
+  if (!group.baseUrl || !group.apiKey) {
+    return { state: "missing", message: "待填写地址和密钥", checkedAt: "", modelCount: group.models?.length || 0 };
+  }
+  return { state: "unknown", message: "未检测", checkedAt: "", modelCount: group.models?.length || 0 };
+}
+
+function setModelGroupStatus(groupId, status) {
+  modelGroupStatus[groupId] = {
+    state: status.state || "unknown",
+    message: status.message || "",
+    checkedAt: status.checkedAt || new Date().toISOString(),
+    modelCount: Number(status.modelCount || 0)
+  };
+}
+
+function publicModelGroups() {
+  return (Array.isArray(config.modelGroups) ? config.modelGroups : []).map((group) => ({
+    id: group.id,
+    name: group.name,
+    active: group.id === config.activeModelGroupId,
+    model: group.model,
+    reviewModel: group.reviewModel,
+    reasoningEffort: group.reasoningEffort,
+    wireApi: group.wireApi,
+    agentEnabled: Boolean(group.agentEnabled),
+    agentAccessMode: normalizeCodexAccessMode(group.agentAccessMode),
+    hasBaseUrl: Boolean(group.baseUrl),
+    hasApiKey: Boolean(group.apiKey),
+    models: Array.isArray(group.models) ? group.models : [],
+    status: getModelGroupStatus(group)
+  }));
+}
+
+function modelGroupDetail(groupId) {
+  const group = getModelGroup(groupId);
+  if (!group) return null;
+  return {
+    ...publicModelGroups().find((item) => item.id === group.id),
+    baseUrl: group.baseUrl,
+    apiKeySaved: Boolean(group.apiKey)
+  };
+}
+
+function persistConfigOnly() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
+}
+
+function upsertModelGroup(nextGroup = {}) {
+  const groups = Array.isArray(config.modelGroups) ? config.modelGroups : [];
+  const requestedId = String(nextGroup.id || "").trim();
+  const existing = groups.find((group) => group.id === requestedId);
+  const base = existing || {};
+  const candidate = normalizeModelGroup({
+    ...base,
+    ...nextGroup,
+    id: existing ? existing.id : nextGroup.id,
+    apiKey: String(nextGroup.apiKey || "").trim() || base.apiKey || "",
+    models: nextGroup.models || base.models || []
+  }, groups.length);
+  const uniqueId = existing ? existing.id : uniqueModelGroupId(candidate.id, groups);
+  const group = { ...candidate, id: uniqueId };
+  const nextGroups = existing
+    ? groups.map((item) => (item.id === existing.id ? group : item))
+    : [...groups, group];
+  return { group, modelGroups: nextGroups };
+}
+
+function uniqueModelGroupId(baseId, groups) {
+  const existing = new Set(groups.map((group) => group.id));
+  if (!existing.has(baseId)) return baseId;
+  for (let index = 2; index < 1000; index += 1) {
+    const next = `${baseId}-${index}`;
+    if (!existing.has(next)) return next;
+  }
+  return `${baseId}-${Date.now()}`;
+}
+
 function directModelEnabled() {
-  return config.directModelProvider === "OpenAI" && Boolean(config.directBaseUrl) && Boolean(config.directApiKey);
+  return Boolean(config.directBaseUrl) && Boolean(config.directApiKey);
 }
 
 function codexModeEnabled() {
@@ -946,31 +1149,77 @@ function textOnlyResponsesInput(input) {
   }));
 }
 
-function buildOpenAIUrl(endpoint) {
-  const base = String(config.directBaseUrl || "").replace(/\/+$/, "");
+function buildOpenAIUrl(endpoint, group = getActiveModelGroup()) {
+  const base = String(group?.baseUrl || config.directBaseUrl || "").replace(/\/+$/, "");
   const normalizedEndpoint = `/${String(endpoint || "").replace(/^\/+/, "")}`;
-  if (/\/v1$/i.test(base)) return new URL(`${base}${normalizedEndpoint}`);
-  return new URL(`${base}/v1${normalizedEndpoint}`);
+  const url = new URL(base);
+  url.search = "";
+  url.hash = "";
+  const basePath = url.pathname.replace(/\/+$/, "");
+  url.pathname = /\/v1$/i.test(basePath) ? `${basePath}${normalizedEndpoint}` : `${basePath}/v1${normalizedEndpoint}`;
+  return url;
 }
 
-async function fetchOpenAIModels(force = false) {
+async function fetchOpenAIModels(force = false, groupId = config.activeModelGroupId) {
+  const group = getModelGroup(groupId);
+  if (!group) return [];
   const now = Date.now();
-  if (!force && modelListCache.length && now - modelListFetchedAt < 10 * 60000) return modelListCache;
-  if (!directModelEnabled()) return [];
-  const data = await requestJsonWithRetry(buildOpenAIUrl("/models"), {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${config.directApiKey}`
-    },
-    timeoutMs: config.directTimeoutMs || 60000
+  const cached = modelListCacheByGroup[group.id];
+  if (!force && cached?.models?.length && now - cached.fetchedAt < 10 * 60000) return cached.models;
+  if (!group.baseUrl || !group.apiKey) {
+    setModelGroupStatus(group.id, {
+      state: "missing",
+      message: "待填写地址和密钥",
+      modelCount: group.models?.length || 0
+    });
+    return group.models || [];
+  }
+  setModelGroupStatus(group.id, {
+    state: "checking",
+    message: "正在连接",
+    modelCount: group.models?.length || 0
   });
-  const models = (Array.isArray(data?.data) ? data.data : [])
-    .map((item) => String(item.id || item.model || "").trim())
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, "en"));
-  modelListCache = Array.from(new Set(models));
-  modelListFetchedAt = now;
-  return modelListCache;
+  try {
+    const data = await requestJsonWithRetry(buildOpenAIUrl("/models", group), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${group.apiKey}`
+      },
+      timeoutMs: config.directTimeoutMs || 60000
+    });
+    const models = (Array.isArray(data?.data) ? data.data : [])
+      .map((item) => String(item.id || item.model || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "en"));
+    const uniqueModels = Array.from(new Set(models));
+    modelListCacheByGroup[group.id] = { models: uniqueModels, fetchedAt: now };
+    setModelGroupStatus(group.id, {
+      state: "connected",
+      message: `已连接，${uniqueModels.length} 个模型`,
+      modelCount: uniqueModels.length
+    });
+    config.modelGroups = (config.modelGroups || []).map((item) => {
+      if (item.id !== group.id) return item;
+      const currentModel = uniqueModels.includes(item.model) ? item.model : uniqueModels[0] || item.model;
+      return {
+        ...item,
+        model: currentModel,
+        reviewModel: uniqueModels.includes(item.reviewModel) ? item.reviewModel : currentModel,
+        models: uniqueModels.length ? uniqueModels : item.models
+      };
+    });
+    config = normalizeConfigShape(config);
+    persistConfigOnly();
+    saveDirectModelToRootConfig(config);
+    return uniqueModels;
+  } catch (error) {
+    setModelGroupStatus(group.id, {
+      state: "error",
+      message: formatDirectModelError(error),
+      modelCount: group.models?.length || 0
+    });
+    throw error;
+  }
 }
 
 function normalizeWireApi(value) {
@@ -2319,7 +2568,8 @@ function createTray() {
 function updateTray() {
   if (!tray) return;
   const observed = lastObservation ? `${lastObservation.active_process || "未知"} | ${lastObservation.active_window_title || "未知窗口"}` : "等待第一次识别";
-  const modelText = directModelEnabled() ? `${config.directModelProvider} ${config.directModel}` : config.tunnelBaseUrl ? "OpenClaw 隧穿" : "本地判断";
+  const activeGroup = getActiveModelGroup();
+  const modelText = directModelEnabled() ? `${activeGroup?.name || "模型组"} ${config.directModel}` : config.tunnelBaseUrl ? "OpenClaw 隧穿" : "本地判断";
   tray.setToolTip(`屏幕记忆 OpenClaw 助手\n${modelText}\n${observed}`);
   tray.setImage(getAppIconImage() || createTrayImage(lastObservation?.blocked ? "#d94841" : directModelEnabled() ? "#2f7df6" : "#7b8494"));
   tray.setContextMenu(
@@ -2385,7 +2635,7 @@ function updateTaskbarOverlay(observation, error = false) {
   if (observation.blocked) {
     mainWindow.setOverlayIcon(createTaskbarBadge("#d94841", "?"), "可能不知道下一步怎么操作");
   } else if (directModelEnabled()) {
-    mainWindow.setOverlayIcon(createTaskbarBadge("#2f7df6", "AI"), "OpenAI 直连观察中");
+    mainWindow.setOverlayIcon(createTaskbarBadge("#2f7df6", "AI"), `${getActiveModelGroup()?.name || "模型组"} 观察中`);
   } else {
     mainWindow.setOverlayIcon(createTaskbarBadge("#7b8494", "M"), "本地记忆观察中");
   }
@@ -2421,6 +2671,7 @@ function getState(extra = {}) {
 }
 
 function publicConfig() {
+  const activeGroup = getActiveModelGroup();
   return {
     tunnelBaseUrl: config.tunnelBaseUrl,
     observeIntervalSeconds: config.observeIntervalSeconds,
@@ -2428,8 +2679,10 @@ function publicConfig() {
     observeIntervalMaxSeconds: config.observeIntervalMaxSeconds,
     memoryEndpoint: config.memoryEndpoint,
     assistantMode: normalizeAssistantMode(config.assistantMode),
+    activeModelGroupId: config.activeModelGroupId,
+    activeModelGroupName: activeGroup?.name || config.directModelProvider || "OpenAI",
+    modelGroups: publicModelGroups(),
     directModelProvider: config.directModelProvider,
-    directBaseUrl: config.directBaseUrl,
     directModel: config.directModel,
     directReviewModel: config.directReviewModel,
     directReasoningEffort: config.directReasoningEffort,
@@ -2457,22 +2710,22 @@ function publicConfig() {
 function loadConfig() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const rootConfig = readRootTomlConfig();
-  if (!fs.existsSync(CONFIG_PATH)) return { ...DEFAULT_CONFIG, ...rootConfig };
+  if (!fs.existsSync(CONFIG_PATH)) return normalizeConfigShape({ ...DEFAULT_CONFIG, ...rootConfig });
   try {
     const electronConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
     const merged = { ...DEFAULT_CONFIG, ...electronConfig, ...rootConfig };
     if (!rootConfig.directApiKey && electronConfig.directApiKey) merged.directApiKey = electronConfig.directApiKey;
-    return merged;
+    return normalizeConfigShape(merged);
   } catch {
-    return { ...DEFAULT_CONFIG, ...rootConfig };
+    return normalizeConfigShape({ ...DEFAULT_CONFIG, ...rootConfig });
   }
 }
 
 function saveConfig(nextConfig) {
   const merged = { ...config, ...nextConfig };
-  config = {
+  config = normalizeConfigShape({
     ...merged,
-  tunnelBaseUrl: String(merged.tunnelBaseUrl || "").trim().replace(/\/+$/, ""),
+    tunnelBaseUrl: String(merged.tunnelBaseUrl || "").trim().replace(/\/+$/, ""),
     directBaseUrl: String(merged.directBaseUrl || "").trim().replace(/\/+$/, ""),
     directApiKey: String(merged.directApiKey || "").trim(),
     assistantMode: normalizeAssistantMode(merged.assistantMode),
@@ -2480,7 +2733,7 @@ function saveConfig(nextConfig) {
     casualChatFrequency: normalizeFrequency(merged.casualChatFrequency),
     codexAccessMode: normalizeCodexAccessMode(merged.codexAccessMode),
     codexSearch: merged.codexSearch !== false
-  };
+  });
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
   updateTray();
@@ -2705,34 +2958,85 @@ function normalizeCodexAccessMode(value) {
   return mode === "ask" ? "ask" : "full";
 }
 
-ipcMain.handle("state:get", () => getState());
-ipcMain.handle("config:saveTunnel", (_event, tunnelBaseUrl) => {
-  const next = saveConfig({ tunnelBaseUrl });
-  publishState({ syncMessage: tunnelBaseUrl ? "隧穿地址已保存" : "记忆隧穿：未填写地址" });
-  return next;
-});
-ipcMain.handle("config:saveDirectModel", (_event, nextConfig) => {
-  const normalized = {
-    directBaseUrl: String(nextConfig?.directBaseUrl || config.directBaseUrl || ""),
-    directApiKey: String(nextConfig?.directApiKey || config.directApiKey || ""),
+async function saveDirectModelConfig(nextConfig = {}) {
+  const targetGroup = nextConfig?.createNew ? null : getModelGroup(String(nextConfig?.modelGroupId || config.activeModelGroupId));
+  const requestedModel = String(nextConfig?.directModel || targetGroup?.model || config.directModel || "gpt-5.5");
+  const requestedReasoning = normalizeReasoningEffort(nextConfig?.directReasoningEffort || targetGroup?.reasoningEffort || "xhigh");
+  const requestedKey = String(nextConfig?.directApiKey || "").trim();
+  const fallbackBaseUrl = nextConfig?.createNew ? "" : targetGroup?.baseUrl || config.directBaseUrl || "";
+  const fallbackApiKey = nextConfig?.createNew ? "" : targetGroup?.apiKey || config.directApiKey || "";
+  const groupPatch = {
+    ...(targetGroup || {}),
+    id: targetGroup?.id || nextConfig?.modelGroupId,
+    name: nextConfig?.name || targetGroup?.name || inferLegacyModelGroupName(nextConfig?.directBaseUrl, "OpenAI"),
+    baseUrl: String(nextConfig?.directBaseUrl || fallbackBaseUrl),
+    apiKey: requestedKey || fallbackApiKey,
+    model: requestedModel,
+    reviewModel: String(nextConfig?.directReviewModel || requestedModel),
+    reasoningEffort: requestedReasoning,
+    wireApi: String(nextConfig?.directWireApi || targetGroup?.wireApi || "auto"),
+    agentEnabled: nextConfig?.agentEnabled === undefined ? Boolean(targetGroup?.agentEnabled) : Boolean(nextConfig.agentEnabled),
+    agentAccessMode: normalizeCodexAccessMode(nextConfig?.agentAccessMode || targetGroup?.agentAccessMode || config.codexAccessMode),
+    models: uniqueValues([...(targetGroup?.models || []), requestedModel, nextConfig?.directReviewModel])
+  };
+  const { group, modelGroups } = upsertModelGroup(groupPatch);
+  saveConfig({
+    modelGroups,
+    activeModelGroupId: group.id,
     assistantMode: normalizeAssistantMode(nextConfig?.assistantMode || config.assistantMode),
-    directModelProvider: String(nextConfig?.directModelProvider || config.directModelProvider || "OpenAI"),
-    directModel: String(nextConfig?.directModel || config.directModel || "gpt-5.5"),
-    directReviewModel: String(nextConfig?.directReviewModel || config.directReviewModel || "gpt-5.4"),
-    directReasoningEffort: String(nextConfig?.directReasoningEffort || config.directReasoningEffort || "xhigh"),
-    directWireApi: String(nextConfig?.directWireApi || config.directWireApi || "auto"),
     disableResponseStorage: nextConfig?.disableResponseStorage === undefined ? config.disableResponseStorage : Boolean(nextConfig.disableResponseStorage),
     networkAccess: String(nextConfig?.networkAccess || config.networkAccess || "enabled"),
     windowsWslSetupAcknowledged:
       nextConfig?.windowsWslSetupAcknowledged === undefined ? config.windowsWslSetupAcknowledged : Boolean(nextConfig.windowsWslSetupAcknowledged),
     modelContextWindow: Number(nextConfig?.modelContextWindow || config.modelContextWindow || 1000000),
     modelAutoCompactTokenLimit: Number(nextConfig?.modelAutoCompactTokenLimit || config.modelAutoCompactTokenLimit || 900000),
-    sendScreenshotsToModel: Boolean(nextConfig?.sendScreenshotsToModel)
-  };
-  saveDirectModelToRootConfig(normalized);
-  const next = saveConfig(normalized);
-  publishState({ statusMessage: directModelEnabled() ? "OpenAI 直连已启用" : "OpenAI 直连未完整配置" });
+    sendScreenshotsToModel: nextConfig?.sendScreenshotsToModel === undefined ? config.sendScreenshotsToModel : Boolean(nextConfig.sendScreenshotsToModel),
+    codexAccessMode: group.agentAccessMode,
+    codexReasoningEffort: group.reasoningEffort
+  });
+  saveDirectModelToRootConfig(config);
+  if (nextConfig?.refreshModels !== false) {
+    try {
+      await fetchOpenAIModels(true, group.id);
+    } catch {
+      // The status dot records the connection error.
+    }
+  }
+  const finalConfig = publicConfig();
+  publishState({ config: finalConfig, statusMessage: directModelEnabled() ? `${group.name} 已启用` : `${group.name} 未完整配置` });
+  return finalConfig;
+}
+
+ipcMain.handle("state:get", () => getState());
+ipcMain.handle("config:saveTunnel", (_event, tunnelBaseUrl) => {
+  const next = saveConfig({ tunnelBaseUrl });
+  publishState({ syncMessage: tunnelBaseUrl ? "隧穿地址已保存" : "记忆隧穿：未填写地址" });
   return next;
+});
+ipcMain.handle("config:saveDirectModel", async (_event, nextConfig) => {
+  return saveDirectModelConfig(nextConfig);
+});
+ipcMain.handle("modelGroups:detail", (_event, groupId) => {
+  const detail = modelGroupDetail(groupId);
+  return detail ? { ok: true, group: detail } : { ok: false, message: "模型组不存在" };
+});
+ipcMain.handle("modelGroups:save", async (_event, nextGroup) => {
+  const normalized = {
+    modelGroupId: nextGroup?.id,
+    name: nextGroup?.name,
+    directBaseUrl: nextGroup?.baseUrl,
+    directApiKey: nextGroup?.apiKey,
+    directModel: nextGroup?.model,
+    directReviewModel: nextGroup?.reviewModel,
+    directReasoningEffort: nextGroup?.reasoningEffort || "xhigh",
+    directWireApi: nextGroup?.wireApi || "auto",
+    agentEnabled: nextGroup?.agentEnabled,
+    agentAccessMode: nextGroup?.agentAccessMode,
+    assistantMode: nextGroup?.assistantMode || config.assistantMode,
+    refreshModels: nextGroup?.refreshModels !== false,
+    createNew: Boolean(nextGroup?.createNew)
+  };
+  return saveDirectModelConfig(normalized);
 });
 ipcMain.handle("config:saveAssistantMode", async (_event, mode) => {
   const assistantMode = normalizeAssistantMode(mode);
@@ -2744,29 +3048,44 @@ ipcMain.handle("config:saveAssistantMode", async (_event, mode) => {
       return next;
     }
   }
-  const next = saveConfig({ assistantMode });
+  const activeGroup = getActiveModelGroup();
+  const next = saveConfig({
+    assistantMode,
+    codexModel: activeGroup?.model || config.codexModel,
+    codexReasoningEffort: activeGroup?.reasoningEffort || config.codexReasoningEffort,
+    codexAccessMode: activeGroup?.agentAccessMode || config.codexAccessMode
+  });
   saveAssistantConfigToRootConfig();
   publishState({ config: next });
   return next;
 });
 ipcMain.handle("config:saveCodexSettings", (_event, nextConfig) => {
+  const accessMode = normalizeCodexAccessMode(nextConfig?.codexAccessMode || config.codexAccessMode);
+  const reasoningEffort = normalizeReasoningEffort(nextConfig?.codexReasoningEffort || config.codexReasoningEffort || config.directReasoningEffort || "xhigh");
+  const model = String(nextConfig?.codexModel || config.codexModel || config.directModel || "gpt-5.5");
+  const activeGroup = getActiveModelGroup();
+  const nextGroups = (config.modelGroups || []).map((group) => group.id === activeGroup?.id
+    ? { ...group, reasoningEffort, agentAccessMode: accessMode, agentEnabled: true }
+    : group);
   const next = saveConfig({
+    modelGroups: nextGroups,
+    activeModelGroupId: activeGroup?.id || config.activeModelGroupId,
     assistantMode: "codex",
-    codexModel: String(nextConfig?.codexModel || config.codexModel || config.directModel || "gpt-5.5"),
-    codexReasoningEffort: String(nextConfig?.codexReasoningEffort || config.codexReasoningEffort || config.directReasoningEffort || "xhigh"),
-    codexAccessMode: normalizeCodexAccessMode(nextConfig?.codexAccessMode || config.codexAccessMode),
+    codexModel: model,
+    codexReasoningEffort: reasoningEffort,
+    codexAccessMode: accessMode,
     codexSearch: nextConfig?.codexSearch === undefined ? config.codexSearch !== false : Boolean(nextConfig.codexSearch)
   });
   saveAssistantConfigToRootConfig();
   publishState({ config: next });
   return next;
 });
-ipcMain.handle("models:list", async (_event, force) => {
+ipcMain.handle("models:list", async (_event, force, groupId) => {
   try {
-    const models = await fetchOpenAIModels(Boolean(force));
-    return { ok: true, models };
+    const models = await fetchOpenAIModels(Boolean(force), groupId || config.activeModelGroupId);
+    return { ok: true, models, config: publicConfig() };
   } catch (error) {
-    return { ok: false, models: [], message: formatDirectModelError(error) };
+    return { ok: false, models: [], message: formatDirectModelError(error), config: publicConfig() };
   }
 });
 ipcMain.handle("codex:refreshStatus", async () => {

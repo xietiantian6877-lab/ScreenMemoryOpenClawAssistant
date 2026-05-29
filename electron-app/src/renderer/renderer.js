@@ -1,11 +1,16 @@
 const appShell = document.getElementById("appShell");
 const composerInput = document.getElementById("composerInput");
 const tunnelInput = document.getElementById("tunnelInput");
+const modelGroupsList = document.getElementById("modelGroupsList");
+const modelGroupNameInput = document.getElementById("modelGroupNameInput");
 const directBaseUrlInput = document.getElementById("directBaseUrlInput");
 const directApiKeyInput = document.getElementById("directApiKeyInput");
+const agentEnabledToggle = document.getElementById("agentEnabledToggle");
+const agentAccessSelect = document.getElementById("agentAccessSelect");
 const sendBtn = document.getElementById("sendBtn");
 const saveTunnelBtn = document.getElementById("saveTunnelBtn");
 const saveDirectBtn = document.getElementById("saveDirectBtn");
+const addModelGroupBtn = document.getElementById("addModelGroupBtn");
 const refreshModelsBtn = document.getElementById("refreshModelsBtn");
 const permissionBtn = document.getElementById("permissionBtn");
 const homeProviderBtn = document.getElementById("homeProviderBtn");
@@ -54,7 +59,9 @@ const buddyModeOptions = [
   { value: "corner", label: "右上角" },
   { value: "off", label: "关闭常驻" }
 ];
-let apiModels = ["gpt-5.5", "gpt-5.4"];
+let apiModels = [];
+let selectedModelGroupId = "";
+let creatingModelGroup = false;
 let codexBusy = false;
 let menuWindowOpen = false;
 let mousePassthrough = false;
@@ -140,7 +147,10 @@ permissionBtn.addEventListener("click", async () => {
   const config = await window.screenMemory.saveCodexSettings({ ...readCodexSettings(), codexAccessMode: nextMode });
   renderConfig(config);
 });
-homeModelSelect.addEventListener("change", saveHomeModel);
+homeModelSelect.addEventListener("change", () => {
+  applyReasoningForSelectedModel();
+  saveHomeModel();
+});
 homeReasoningSelect.addEventListener("change", saveHomeModel);
 codexSearchToggle.addEventListener("change", async () => {
   const config = await window.screenMemory.saveCodexSettings(readCodexSettings());
@@ -164,8 +174,14 @@ saveDirectBtn.addEventListener("click", saveDirectModel);
 directApiKeyInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") saveDirectModel();
 });
+modelGroupNameInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") saveDirectModel();
+});
+addModelGroupBtn.addEventListener("click", startNewModelGroup);
 
-directBaseUrlInput.addEventListener("change", () => refreshModels(true));
+directBaseUrlInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") saveDirectModel();
+});
 
 document.getElementById("syncTodayBtn").addEventListener("click", async () => {
   syncText.textContent = "同步中";
@@ -210,25 +226,43 @@ async function saveTunnel() {
 async function saveDirectModel() {
   saveDirectBtn.disabled = true;
   saveDirectBtn.textContent = "保存中";
-  const config = await window.screenMemory.saveDirectModel({
-    directModelProvider: "OpenAI",
+  const activeGroup = getSelectedModelGroup() || getActiveModelGroup(currentConfig);
+  const config = await window.screenMemory.saveModelGroup({
+    id: creatingModelGroup ? "" : (selectedModelGroupId || activeGroup?.id || ""),
+    createNew: creatingModelGroup,
+    name: modelGroupNameInput.value.trim() || activeGroup?.name || "模型组",
+    baseUrl: directBaseUrlInput.value.trim(),
+    apiKey: directApiKeyInput.value.trim(),
+    model: activeGroup?.model || currentConfig?.directModel || "gpt-5.5",
+    reviewModel: activeGroup?.reviewModel || activeGroup?.model || currentConfig?.directReviewModel || "gpt-5.5",
+    reasoningEffort: activeGroup?.reasoningEffort || homeReasoningSelect.value || "xhigh",
+    wireApi: activeGroup?.wireApi || "auto",
+    agentEnabled: agentEnabledToggle.checked,
+    agentAccessMode: agentAccessSelect.value || "full",
     assistantMode: currentConfig?.assistantMode || "api",
-    directBaseUrl: directBaseUrlInput.value.trim(),
-    directApiKey: directApiKeyInput.value.trim(),
-    directModel: homeModelSelect.value || "gpt-5.5",
-    directReviewModel: homeModelSelect.value || "gpt-5.4",
-    directReasoningEffort: homeReasoningSelect.value || "xhigh",
-    directWireApi: "auto",
-    disableResponseStorage: true,
-    networkAccess: "enabled",
-    windowsWslSetupAcknowledged: true,
-    modelContextWindow: 1000000,
-    modelAutoCompactTokenLimit: 900000
+    refreshModels: true
   });
+  creatingModelGroup = false;
+  selectedModelGroupId = config?.activeModelGroupId || selectedModelGroupId;
   directApiKeyInput.value = "";
   renderConfig(config);
-  saveDirectBtn.textContent = "保存直连";
+  await loadModelGroupDetail(selectedModelGroupId);
+  saveDirectBtn.textContent = "确认";
   saveDirectBtn.disabled = false;
+}
+
+function startNewModelGroup() {
+  creatingModelGroup = true;
+  selectedModelGroupId = "";
+  modelGroupNameInput.value = "";
+  directBaseUrlInput.value = "";
+  directApiKeyInput.value = "";
+  directApiKeyInput.placeholder = "API key";
+  agentEnabledToggle.checked = true;
+  agentAccessSelect.value = "ask";
+  settingsStatus.textContent = "填写后确认，模型组会自动刷新";
+  renderModelGroups(currentConfig);
+  modelGroupNameInput.focus();
 }
 
 async function packageMemory(scope) {
@@ -279,25 +313,79 @@ function renderMediaState(media = {}) {
   }
 }
 
+function renderModelGroups(config = currentConfig) {
+  if (!modelGroupsList) return;
+  const groups = Array.isArray(config?.modelGroups) ? config.modelGroups : [];
+  const activeId = selectedModelGroupId || config?.activeModelGroupId || "";
+  modelGroupsList.innerHTML = "";
+  groups.forEach((group) => {
+    const button = document.createElement("button");
+    const status = group.status || {};
+    button.type = "button";
+    button.className = "model-group-btn";
+    button.classList.toggle("active", !creatingModelGroup && group.id === activeId);
+    button.title = status.message || group.name || "";
+    button.innerHTML = `
+      <span class="status-dot ${status.state || "unknown"}"></span>
+      <span class="model-group-name"></span>
+      <span class="model-group-count"></span>
+    `;
+    button.querySelector(".model-group-name").textContent = group.name || "模型组";
+    button.querySelector(".model-group-count").textContent = `${group.models?.length || 0}`;
+    button.addEventListener("click", () => loadModelGroupDetail(group.id));
+    modelGroupsList.appendChild(button);
+  });
+}
+
+async function loadModelGroupDetail(groupId) {
+  if (!groupId || !window.screenMemory.getModelGroupDetail) return;
+  creatingModelGroup = false;
+  const result = await window.screenMemory.getModelGroupDetail(groupId);
+  if (!result?.ok || !result.group) return;
+  const group = result.group;
+  selectedModelGroupId = group.id;
+  if (document.activeElement !== modelGroupNameInput) modelGroupNameInput.value = group.name || "";
+  if (document.activeElement !== directBaseUrlInput) directBaseUrlInput.value = group.baseUrl || "";
+  directApiKeyInput.value = "";
+  directApiKeyInput.placeholder = group.apiKeySaved ? "已保存，输入新密钥可替换" : "API key";
+  agentEnabledToggle.checked = Boolean(group.agentEnabled);
+  agentAccessSelect.value = group.agentAccessMode || "full";
+  settingsStatus.textContent = `${group.name || "模型组"} · ${statusText(group.status)}`;
+  renderModelGroups(currentConfig);
+}
+
+function statusText(status = {}) {
+  const state = status.state || "unknown";
+  if (state === "connected") return "已连接";
+  if (state === "checking") return "检测中";
+  if (state === "missing") return "待配置";
+  if (state === "error") return "连接失败";
+  return "未检测";
+}
+
 function renderConfig(config) {
   currentConfig = config || currentConfig || {};
   const tunnelUrl = config?.tunnelBaseUrl || "";
   if (document.activeElement !== tunnelInput) tunnelInput.value = tunnelUrl;
-  if (document.activeElement !== directBaseUrlInput) directBaseUrlInput.value = config?.directBaseUrl || "";
   if (document.activeElement !== buddyModeSelect) buddyModeSelect.value = config?.buddyDefaultMode || "cursor";
   updateBuddyModeMenuButton();
   const frequency = Number(config?.casualChatFrequency ?? 70);
   if (document.activeElement !== chatFrequencyInput) chatFrequencyInput.value = String(frequency);
   renderChatFrequencyText(frequency);
   guidanceToggle.checked = Boolean(config?.proactiveGuidance);
+  renderModelGroups(config);
+  if (!selectedModelGroupId && !creatingModelGroup && config?.activeModelGroupId) {
+    loadModelGroupDetail(config.activeModelGroupId);
+  }
   renderMode(config);
 
   if (config?.assistantMode === "codex" && config?.codexStatus?.connected) {
     connectionText.textContent = "Codex 已连接";
-    settingsStatus.textContent = `${config.codexModel || config.directModel || "Codex"} · ${config.codexAccessMode === "ask" ? "确认权限" : "完全权限"}`;
+    settingsStatus.textContent = `${config.activeModelGroupName || "模型组"} · ${config.codexAccessMode === "ask" ? "确认权限" : "完全权限"}`;
   } else if (config?.directEnabled) {
-    connectionText.textContent = "API 运行";
-    settingsStatus.textContent = `${config.directModelProvider || "OpenAI"} ${getModelGroupName(config.directModel)}`;
+    const activeGroup = getActiveModelGroup(config);
+    connectionText.textContent = `${config.activeModelGroupName || "API"} 运行`;
+    settingsStatus.textContent = `${config.activeModelGroupName || "模型组"} ${getModelGroupName(config.directModel)} · ${statusText(activeGroup?.status)}`;
   } else if (tunnelUrl) {
     connectionText.textContent = "隧穿已连接";
     settingsStatus.textContent = "OpenClaw 隧穿";
@@ -310,14 +398,17 @@ function renderConfig(config) {
 function renderMode(config = {}) {
   const mode = config.assistantMode === "codex" ? "codex" : "api";
   const codexConnected = isCodexReady(config);
+  const modelKey = mode === "codex"
+    ? `codex:${codexModels.join("|")}`
+    : `api:${(config.modelGroups || []).map((group) => `${group.id}:${group.model}:${(group.models || []).join(",")}`).join("|")}`;
   const renderedMode = homeModelSelect.dataset.mode || "";
-  if (renderedMode !== mode) {
-    homeModelSelect.dataset.mode = mode;
+  if (renderedMode !== modelKey) {
+    homeModelSelect.dataset.mode = modelKey;
     renderModelOptions();
   }
   document.body.classList.toggle("codex-enabled", mode === "codex" && codexConnected);
   document.body.classList.toggle("codex-muted", !(mode === "codex" && codexConnected));
-  homeProviderBtn.textContent = mode === "codex" ? "Codex" : "OpenAI";
+  homeProviderBtn.textContent = mode === "codex" ? "Codex" : "API";
   homeProviderBtn.classList.toggle("muted", mode !== "codex");
   homeProviderBtn.disabled = codexBusy;
   homeProviderBtn.title = !codexConnected && mode !== "codex" ? "点击检测并切换 Codex" : "切换 API/Codex";
@@ -329,9 +420,11 @@ function renderMode(config = {}) {
   permissionBtn.disabled = codexBusy || mode !== "codex" || !codexConnected;
   homeReasoningSelect.disabled = codexBusy;
   homeModelSelect.disabled = codexBusy;
-  const selectedModel = mode === "codex" ? (config.codexModel || config.directModel || "gpt-5.5") : (config.directModel || "gpt-5.5");
+  const selectedModel = mode === "codex"
+    ? (config.codexModel || config.directModel || "gpt-5.5")
+    : modelChoiceValue(config.activeModelGroupId, config.directModel || "gpt-5.5");
   const models = getCurrentModelOptions(config);
-  homeModelSelect.value = models.includes(selectedModel) ? selectedModel : "";
+  homeModelSelect.value = models.some((item) => item.value === selectedModel) ? selectedModel : "";
   updateModelMenuButton();
   homeReasoningSelect.value = mode === "codex" ? (config.codexReasoningEffort || "xhigh") : (config.directReasoningEffort || "xhigh");
   updateReasoningMenuButton();
@@ -373,30 +466,39 @@ async function saveHomeModel() {
     renderConfig(config);
     return;
   }
+  const choice = parseModelChoice(homeModelSelect.value);
+  const group = getModelGroupById(choice.groupId) || getActiveModelGroup(currentConfig);
+  const reasoning = homeReasoningSelect.value || group?.reasoningEffort || "xhigh";
   const config = await window.screenMemory.saveDirectModel({
-    directModelProvider: "OpenAI",
+    modelGroupId: choice.groupId || group?.id || currentConfig?.activeModelGroupId,
     assistantMode: "api",
-    directBaseUrl: directBaseUrlInput.value.trim(),
+    directBaseUrl: group?.baseUrl || "",
     directApiKey: "",
-    directModel: homeModelSelect.value || "gpt-5.5",
-    directReviewModel: homeModelSelect.value || "gpt-5.4",
-    directReasoningEffort: homeReasoningSelect.value || "xhigh",
-    directWireApi: "auto",
+    directModel: choice.model || group?.model || "gpt-5.5",
+    directReviewModel: choice.model || group?.reviewModel || "gpt-5.5",
+    directReasoningEffort: reasoning,
+    directWireApi: group?.wireApi || "auto",
+    agentEnabled: group?.agentEnabled,
+    agentAccessMode: group?.agentAccessMode,
     disableResponseStorage: true,
     networkAccess: "enabled",
     windowsWslSetupAcknowledged: true,
     modelContextWindow: 1000000,
-    modelAutoCompactTokenLimit: 900000
+    modelAutoCompactTokenLimit: 900000,
+    refreshModels: false
   });
   renderConfig(config);
 }
 
-async function refreshModels(force) {
-  const result = await window.screenMemory.listModels(Boolean(force));
+async function refreshModels(force, groupId = selectedModelGroupId || currentConfig?.activeModelGroupId) {
+  const result = await window.screenMemory.listModels(Boolean(force), groupId);
   if (result?.ok && result.models?.length) {
     apiModels = result.models;
+    if (result.config) currentConfig = result.config;
     renderModelOptions();
     renderConfig(currentConfig);
+  } else if (result?.config) {
+    renderConfig(result.config);
   } else if (result?.message) {
     settingsStatus.textContent = result.message;
   }
@@ -412,38 +514,85 @@ async function refreshCodexStatus() {
 function renderModelOptions() {
   const selected = currentConfig?.assistantMode === "codex"
     ? currentConfig?.codexModel
-    : currentConfig?.directModel;
+    : modelChoiceValue(currentConfig?.activeModelGroupId, currentConfig?.directModel);
   const models = getCurrentModelOptions(currentConfig);
   homeModelSelect.innerHTML = "";
   homeModelMenu.innerHTML = "";
-  models.forEach((model) => {
+  models.forEach((item) => {
     const option = document.createElement("option");
-    option.value = model;
-    option.textContent = formatModelLabel(model);
+    option.value = item.value;
+    option.textContent = item.label;
     homeModelSelect.appendChild(option);
 
-    const item = document.createElement("button");
-    item.type = "button";
-    item.role = "option";
-    item.dataset.model = model;
-    item.textContent = formatModelLabel(model);
-    item.classList.toggle("active", model === selected);
-    item.addEventListener("click", async (event) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.role = "option";
+    button.dataset.model = item.value;
+    button.textContent = item.label;
+    button.classList.toggle("active", item.value === selected);
+    button.addEventListener("click", async (event) => {
       event.stopPropagation();
-      homeModelSelect.value = model;
+      homeModelSelect.value = item.value;
+      applyReasoningForSelectedModel();
       closeAllMenus();
       await saveHomeModel();
     });
-    homeModelMenu.appendChild(item);
+    homeModelMenu.appendChild(button);
   });
-  homeModelSelect.value = models.includes(selected) ? selected : "";
+  homeModelSelect.value = models.some((item) => item.value === selected) ? selected : "";
   updateModelMenuButton();
   renderReasoningOptions();
 }
 
 function getCurrentModelOptions(config = currentConfig) {
-  if (config?.assistantMode === "codex") return codexModels;
-  return apiModels;
+  if (config?.assistantMode === "codex") return codexModels.map((model) => ({ value: model, label: formatModelLabel(model), model }));
+  return getApiModelOptions(config);
+}
+
+function getApiModelOptions(config = currentConfig) {
+  const groups = Array.isArray(config?.modelGroups) ? config.modelGroups : [];
+  return groups.flatMap((group) => {
+    const models = (Array.isArray(group.models) && group.models.length ? group.models : [group.model || config?.directModel || "gpt-5.5"])
+      .filter(Boolean);
+    return models.map((model) => ({
+      value: modelChoiceValue(group.id, model),
+      label: `${group.name || "模型组"} / ${formatModelLabel(model)}`,
+      groupId: group.id,
+      model
+    }));
+  });
+}
+
+function modelChoiceValue(groupId, model) {
+  return `${String(groupId || "")}::${String(model || "")}`;
+}
+
+function parseModelChoice(value) {
+  const text = String(value || "");
+  const index = text.indexOf("::");
+  if (index < 0) return { groupId: currentConfig?.activeModelGroupId || "", model: text };
+  return { groupId: text.slice(0, index), model: text.slice(index + 2) };
+}
+
+function getModelGroupById(groupId, config = currentConfig) {
+  return (Array.isArray(config?.modelGroups) ? config.modelGroups : []).find((group) => group.id === groupId) || null;
+}
+
+function getActiveModelGroup(config = currentConfig) {
+  return getModelGroupById(config?.activeModelGroupId, config) || (Array.isArray(config?.modelGroups) ? config.modelGroups[0] : null);
+}
+
+function getSelectedModelGroup() {
+  return getModelGroupById(selectedModelGroupId) || getActiveModelGroup(currentConfig);
+}
+
+function applyReasoningForSelectedModel() {
+  if (currentConfig?.assistantMode === "codex") return;
+  const choice = parseModelChoice(homeModelSelect.value);
+  const group = getModelGroupById(choice.groupId);
+  if (!group) return;
+  homeReasoningSelect.value = group.reasoningEffort || "xhigh";
+  updateReasoningMenuButton();
 }
 
 function formatModelLabel(model) {
@@ -452,7 +601,8 @@ function formatModelLabel(model) {
 
 function updateModelMenuButton() {
   const value = homeModelSelect.value || "";
-  homeModelMenuBtn.textContent = value ? formatModelLabel(value) : "模型";
+  const option = getCurrentModelOptions(currentConfig).find((item) => item.value === value);
+  homeModelMenuBtn.textContent = option?.label || (value ? formatModelLabel(parseModelChoice(value).model) : "模型");
   Array.from(homeModelMenu.querySelectorAll("button")).forEach((item) => {
     const active = item.dataset.model === value;
     item.classList.toggle("active", active);
@@ -537,13 +687,13 @@ function showDropdown(type, button) {
     ? buddyModeOptions
     : isReasoning
       ? reasoningOptions.map((item) => ({ value: item.value, label: item.label }))
-      : getCurrentModelOptions(currentConfig).map((model) => ({ value: model, label: formatModelLabel(model) }));
+      : getCurrentModelOptions(currentConfig).map((item) => ({ value: item.value, label: item.label }));
   const selected = isBuddyMode ? buddyModeSelect.value : isReasoning ? homeReasoningSelect.value : homeModelSelect.value;
   window.screenMemory.showDropdown({
     type,
     selected,
     items,
-    width: isBuddyMode ? 108 : isReasoning ? 92 : 168,
+    width: isBuddyMode ? 108 : isReasoning ? 92 : 220,
     rect: {
       left: rect.left,
       right: rect.right,
@@ -570,6 +720,7 @@ async function handleDropdownSelect(payload = {}) {
     return;
   }
   homeModelSelect.value = String(payload.value || "");
+  applyReasoningForSelectedModel();
   updateModelMenuButton();
   closeMenuElements();
   await saveHomeModel();

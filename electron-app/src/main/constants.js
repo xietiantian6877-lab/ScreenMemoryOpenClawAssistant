@@ -17,6 +17,22 @@ const DEFAULT_CONFIG = {
   blockedCheckMinutes: 6,
   memoryEndpoint: "/memory/sync",
   assistantMode: "api",
+  activeModelGroupId: "allincoding",
+  modelGroups: [
+    {
+      id: "allincoding",
+      name: "非本机操作应用",
+      baseUrl: "https://fast.allincoding.cc",
+      apiKey: "",
+      model: "gpt-5.5",
+      reviewModel: "gpt-5.4",
+      reasoningEffort: "xhigh",
+      wireApi: "auto",
+      agentEnabled: false,
+      agentAccessMode: "full",
+      models: ["gpt-5.5", "gpt-5.4"]
+    }
+  ],
   directModelProvider: "OpenAI",
   directBaseUrl: "https://fast.allincoding.cc",
   directApiKey: "",
